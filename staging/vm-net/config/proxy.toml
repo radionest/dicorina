@@ -1,0 +1,41 @@
+[pacs]
+host = "10.0.0.10"
+port = 4242
+aet = "HOSPITALPACS"
+
+[pool]
+aets = ["DICORINA1", "DICORINA2"]
+per_aet_cap = 1
+
+[scp]
+bind_ip = "0.0.0.0"
+port = 11112
+
+[dimse]
+listen_ip = "0.0.0.0"
+listen_port = 4242
+[dimse.allowlist]
+CLIENTA = "10.0.0.31:11112"
+CLIENTB = "10.0.0.32:11112"
+
+[http]
+bind_host = "0.0.0.0"
+bind_port = 8042
+auth_token = ""
+
+[cache]
+dir = "/var/cache/dicorina"
+disk_ttl_hours = 24
+disk_max_size_gb = 10.0
+qido_ttl_seconds = 5.0
+eviction_interval_seconds = 300.0
+
+[timeouts]
+cfind = 30.0
+cmove = 300.0
+arrival = 60.0
+completion_grace = 5.0
+
+[healthcheck]
+interval_seconds = 9999.0
+test_study_uid = "1.2.826.0.1.3680043.8.498.1"
