@@ -17,6 +17,7 @@ from dimsechord import (
 from fastapi import FastAPI
 
 from dicorina.errors import register_exception_handlers
+from dicorina.eviction import EvictionLoop
 
 if TYPE_CHECKING:
     from dicorina.config import DicorinaConfig
@@ -80,9 +81,14 @@ async def lifespan(app: FastAPI):
     dimse.start(cfg.dimse.listen_port, cfg.dimse.listen_ip)
     app.state.dimse = dimse
 
+    eviction = EvictionLoop(cache, cfg.cache.eviction_interval_seconds)
+    eviction.start()
+    app.state.eviction = eviction
+
     try:
         yield
     finally:
+        eviction.stop()
         dimse.stop()
         scp.stop()
         cache.shutdown()
