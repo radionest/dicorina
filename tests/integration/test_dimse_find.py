@@ -41,9 +41,7 @@ async def test_external_scu_c_find_study(app_client, seeded_study) -> None:
         query.StudyInstanceUID = ""
         query.PatientName = ""
         found = []
-        for status, ident in assoc.send_c_find(
-            query, StudyRootQueryRetrieveInformationModelFind
-        ):
+        for status, ident in assoc.send_c_find(query, StudyRootQueryRetrieveInformationModelFind):
             if status and status.Status == 0xFF00 and ident is not None:
                 found.append(str(ident.StudyInstanceUID))
         assoc.release()

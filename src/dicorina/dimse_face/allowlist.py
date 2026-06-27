@@ -23,9 +23,7 @@ class DestinationAllowlist:
             try:
                 port = int(port_str)
             except ValueError as err:
-                raise ValueError(
-                    f"Invalid port in allowlist entry for {aet!r}: {addr!r}"
-                ) from err
+                raise ValueError(f"Invalid port in allowlist entry for {aet!r}: {addr!r}") from err
             self._destinations[aet] = Destination(host=host, port=port)
 
     def get(self, aet: str) -> Destination | None:

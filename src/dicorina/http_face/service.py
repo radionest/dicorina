@@ -98,9 +98,7 @@ class ProxyService:
         )
         series_uids = [s.series_instance_uid for s in series]
         datasets = [ds async for ds in self._engine.stream_study(study_uid, series_uids)]
-        return await asyncio.to_thread(
-            convert_datasets_to_dicom_json, datasets, base_url
-        )
+        return await asyncio.to_thread(convert_datasets_to_dicom_json, datasets, base_url)
 
     async def series_metadata(
         self, study_uid: str, series_uid: str, base_url: str

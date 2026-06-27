@@ -20,9 +20,7 @@ def _parse_frames(frames: str) -> list[int]:
 
 
 @router.get("/studies/{study_uid}/metadata")
-async def study_metadata(
-    study_uid: str, request: Request, service: ServiceDep
-) -> JSONResponse:
+async def study_metadata(study_uid: str, request: Request, service: ServiceDep) -> JSONResponse:
     meta = await service.study_metadata(study_uid, _base_url(request))
     return JSONResponse(content=meta, media_type=DICOM_JSON)
 
@@ -35,9 +33,7 @@ async def series_metadata(
     return JSONResponse(content=meta, media_type=DICOM_JSON)
 
 
-@router.get(
-    "/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}/frames/{frames}"
-)
+@router.get("/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}/frames/{frames}")
 async def retrieve_frames(
     study_uid: str,
     series_uid: str,

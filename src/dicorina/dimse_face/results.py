@@ -66,4 +66,8 @@ def image_to_dataset(r: ImageResult) -> Dataset:
         ds.SOPClassUID = r.sop_class_uid
     if r.instance_number is not None:
         ds.InstanceNumber = r.instance_number
+    if r.rows is not None:
+        ds.Rows = r.rows
+    if r.columns is not None:
+        ds.Columns = r.columns
     return ds

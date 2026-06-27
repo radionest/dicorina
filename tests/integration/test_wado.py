@@ -40,9 +40,7 @@ async def test_instance_retrieve_is_dicom(app_client, seeded_study) -> None:
     client, _ = app_client
     study, series = seeded_study["study"][0], seeded_study["series"][0]
     sop = seeded_study[series][0]
-    resp = await client.get(
-        f"/dicom-web/studies/{study}/series/{series}/instances/{sop}"
-    )
+    resp = await client.get(f"/dicom-web/studies/{study}/series/{series}/instances/{sop}")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/dicom")
     assert resp.content[128:132] == b"DICM"
@@ -52,9 +50,7 @@ async def test_instance_retrieve_is_dicom(app_client, seeded_study) -> None:
 async def test_series_archive_zip(app_client, seeded_study) -> None:
     client, _ = app_client
     study, series = seeded_study["study"][0], seeded_study["series"][0]
-    resp = await client.get(
-        f"/dicom-web/studies/{study}/series/{series}/archive"
-    )
+    resp = await client.get(f"/dicom-web/studies/{study}/series/{series}/archive")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/zip"
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
