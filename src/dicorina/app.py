@@ -65,9 +65,25 @@ async def lifespan(app: FastAPI):
     )
     app.state.health = {"status": "starting"}  # Task 10 replaces with Healthcheck
 
+    from dicorina.dimse_face.allowlist import DestinationAllowlist
+    from dicorina.dimse_face.face import DimseFace
+
+    dimse = DimseFace(
+        engine=engine,
+        client=client,
+        pacs=pacs,
+        allowlist=DestinationAllowlist(cfg.dimse.allowlist),
+        loop=app.state.loop,
+        called_aets=set(pool.aets),
+        cfind_timeout=cfg.timeouts.cfind,
+    )
+    dimse.start(cfg.dimse.listen_port, cfg.dimse.listen_ip)
+    app.state.dimse = dimse
+
     try:
         yield
     finally:
+        dimse.stop()
         scp.stop()
         cache.shutdown()
 
