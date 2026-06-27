@@ -1,0 +1,97 @@
+# dicorina configuration example
+# All values shown are defaults; omit a section to use defaults entirely.
+
+# PACS connection configuration (required)
+[pacs]
+# Hostname or IP address of the PACS server
+host = "10.0.0.10"
+# DICOM port (typically 104)
+port = 104
+# AE Title of the PACS server
+aet = "HOSPITALPACS"
+
+# Connection pool configuration
+[pool]
+# AE Titles to register with the PACS (defaults to ["DICORINA"])
+# Note: per_aet_cap is the maximum concurrent associations per AET.
+# If you define multiple AETs here, ensure your PACS routing supports them,
+# and consider the total connection load: total_max = len(aets) × per_aet_cap.
+aets = ["DICORINA"]
+# Maximum concurrent DIMSE associations per AET
+per_aet_cap = 1
+
+# DIMSE C-STORE Service Class Provider (SCP) configuration
+[scp]
+# IP address to bind the SCP to (0.0.0.0 = all interfaces)
+bind_ip = "0.0.0.0"
+# Port for C-STORE receive (this is where the PACS sends instances)
+port = 11112
+
+# DIMSE send configuration
+[dimse]
+# IP address for outbound DIMSE associations (typically the local IP visible to PACS)
+listen_ip = "0.0.0.0"
+# Port for outbound DIMSE associations (ephemeral; must be routable from PACS back to this host)
+listen_port = 4242
+# Optional: AE Title to IP:port allowlist for security
+# Uncomment to restrict which remote AEs can connect
+# [dimse.allowlist]
+# WORKSTATION = "10.0.0.31:11112"
+
+# HTTP server configuration
+[http]
+# Bind address for the HTTP server
+bind_host = "127.0.0.1"
+# HTTP listen port
+bind_port = 8000
+# Authentication token for API access
+# Empty string: auth disabled
+# Set here or via DICORINA_AUTH_TOKEN environment variable (env var takes precedence)
+auth_token = ""
+
+# File-based and in-memory cache configuration
+[cache]
+# Directory for on-disk cache (required)
+dir = "/var/cache/dicorina"
+# In-memory cache: TTL in minutes
+memory_ttl_minutes = 30
+# In-memory cache: maximum number of entries
+memory_max_entries = 50
+# Disk cache: TTL in hours
+disk_ttl_hours = 24
+# Disk cache: maximum size in gigabytes
+disk_max_size_gb = 10.0
+# QIDO-RS query cache: TTL in seconds
+qido_ttl_seconds = 5.0
+# Cache eviction check interval in seconds
+eviction_interval_seconds = 300.0
+
+# DIMSE operation timeouts
+[timeouts]
+# C-FIND timeout in seconds
+cfind = 30.0
+# C-MOVE timeout in seconds
+cmove = 300.0
+# Instance arrival timeout (for multi-frame sends) in seconds
+arrival = 60.0
+# Grace period after completion signal in seconds
+completion_grace = 5.0
+
+# Health check configuration
+[healthcheck]
+# Interval between health checks in seconds
+interval_seconds = 300.0
+# Study UID for test queries (empty = echo-only health check)
+test_study_uid = ""
+# Series UID for test queries (ignored if test_study_uid is empty)
+test_series_uid = ""
+
+# OHIF Viewer integration
+[ohif]
+# Enable OHIF viewer integration
+enabled = false
+# Friendly name for the deployment (shown in OHIF UI)
+friendly_name = "dicorina"
+# External root URL for the OHIF viewer (e.g., "https://viewer.example.com")
+# If unset, OHIF endpoints are disabled
+external_root = null
