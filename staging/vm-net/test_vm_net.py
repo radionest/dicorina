@@ -61,3 +61,4 @@ def test_s6_cross_face_cache_hit(results):
 
 def test_s7_eviction(results):
     assert va.check_s7(results["proxy"]) == []
+    print("OBSERVED S7 evicted_log_seen:", results["proxy"].get("evicted_log_seen"))

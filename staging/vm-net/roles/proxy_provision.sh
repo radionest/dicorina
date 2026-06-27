@@ -19,7 +19,13 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # install.sh uses relative paths (src/, pyproject.toml, deploy/config.example.toml,
 # deploy/dicorina.service via $OLDPWD) — must be invoked with CWD = repo root.
+# uv fetches a managed Python 3.12; place it in a world-readable dir so the dicorina service
+# user (User=dicorina) can read the interpreter the venv links to (default /root/.local/share/uv
+# is mode 700). NOTE: not host-verifiable — confirm at the live run.
+export UV_PYTHON_INSTALL_DIR=/opt/uv/python
+install -d -m 0755 /opt/uv
 (cd /repo && DEST=/opt/dicorina bash /repo/deploy/install.sh)
+chmod -R o+rX /opt/uv 2>/dev/null || true
 install -m 0644 /repo/staging/vm-net/config/proxy.toml /etc/dicorina/config.toml
 systemctl enable --now dicorina
 

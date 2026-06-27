@@ -76,7 +76,16 @@ def test_s6_cross_face():
 
 
 def test_s7_eviction():
+    # pass: eviction happened, log seen
     assert va.check_s7({
         "studies_before_evict": 4, "studies_after_evict": 0, "evicted_log_seen": True}) == []
+    # pass: eviction happened, log NOT seen — observational only per spec §8
+    assert va.check_s7({
+        "studies_before_evict": 4, "studies_after_evict": 0, "evicted_log_seen": False}) == []
+    # fail: no reduction in study count
     assert va.check_s7({
         "studies_before_evict": 4, "studies_after_evict": 4, "evicted_log_seen": True})
+    # fail: missing after key → fail-closed (after defaults to before → no reduction)
+    assert va.check_s7({"studies_before_evict": 4})
+    # fail: nothing was cached before eviction
+    assert va.check_s7({"studies_before_evict": 0, "studies_after_evict": 0})

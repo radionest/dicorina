@@ -129,13 +129,13 @@ def check_s6(clienta, clientb, study, n):
 
 
 def check_s7(proxy):
+    # evicted_log_seen is recorded but observational per spec §8: INFO 'Evicted' is not
+    # routed to journald by the deployed service (no root logger configured).
     fails = []
     before = proxy.get("studies_before_evict", 0)
-    after = proxy.get("studies_after_evict", -1)
+    after = proxy.get("studies_after_evict", before)  # missing → after==before → fails
     if before < 1:
         fails.append(f"S7: expected >=1 cached study before eviction, got {before}")
     if not before > after:
         fails.append(f"S7: eviction did not reduce study count ({before} -> {after})")
-    if not proxy.get("evicted_log_seen"):
-        fails.append("S7: no dimsechord 'Evicted' log line observed")
     return fails
