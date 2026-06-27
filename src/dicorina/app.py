@@ -64,7 +64,13 @@ async def lifespan(app: FastAPI):
     app.state.service = ProxyService(
         client, engine, cache, pacs, qido_cache, cfind_timeout=cfg.timeouts.cfind
     )
-    app.state.health = {"status": "starting"}  # Task 10 replaces with Healthcheck
+
+    from dicorina.healthcheck import Healthcheck
+
+    health = Healthcheck(pacs, engine, cfg.healthcheck, primary_aet=pool.aets[0])
+    await health.startup()
+    health.start()
+    app.state.health = health
 
     from dicorina.dimse_face.allowlist import DestinationAllowlist
     from dicorina.dimse_face.face import DimseFace
@@ -88,6 +94,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        health.stop()
         eviction.stop()
         dimse.stop()
         scp.stop()
