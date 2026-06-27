@@ -28,6 +28,7 @@ def test_proxy_toml_pool_allowlist_and_pacs():
     assert proxy["pool"]["aets"] == ["DICORINA1", "DICORINA2"]
     assert proxy["scp"]["port"] == 11112
     assert proxy["dimse"]["listen_port"] == 4242
-    assert proxy["dimse"]["allowlist"] == {"CLIENTA": "10.0.0.31:11112", "CLIENTB": "10.0.0.32:11112"}
+    assert proxy["dimse"]["allowlist"] == {
+        "CLIENTA": "10.0.0.31:11112", "CLIENTB": "10.0.0.32:11112"}
     assert proxy["http"]["auth_token"] == ""
     assert proxy["healthcheck"]["test_study_uid"] == "1.2.826.0.1.3680043.8.498.1"

@@ -28,7 +28,7 @@ def test_barrier_wait_all_times_out_without_real_sleep(tmp_path):
     assert ok is False
 
 
-def test_record_received_accumulates_per_phase(tmp_path):
+def test_record_received_accumulates_per_phase(tmp_path):  # noqa: ARG001
     r = agent_core.new_result("clienta", "CLIENTA")
     agent_core.record_received(r, "s1", "1.2.3", "CLARINETPROXY")
     agent_core.record_received(r, "s1", "1.2.3", "CLARINETPROXY")

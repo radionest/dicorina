@@ -1,4 +1,4 @@
-"""SCU client agent: Storage SCP + scripted HTTP/DIMSE scenarios S0–S7.
+"""SCU client agent: Storage SCP + scripted HTTP/DIMSE scenarios S0-S7.
 
 Driven entirely by env (see plan Task 8 interfaces). Records every observation
 via agent_core and writes RESULT_PATH; coordinates concurrent phases through
@@ -148,7 +148,7 @@ def _qido_name(dataset_list):
     return pn[0].get("Alphabetic") if pn else None
 
 
-def cmove(phase, study_uid, dest_aet):
+def cmove(study_uid, dest_aet):
     ae = AE(ae_title=SELF_AET)
     ae.add_requested_context(StudyRootQueryRetrieveInformationModelMove)
     assoc = ae.associate(PROXY_HOST, PROXY_DIMSE, ae_title=PROXY_CALLED_AET)
@@ -157,7 +157,9 @@ def cmove(phase, study_uid, dest_aet):
         ds = Dataset()
         ds.QueryRetrieveLevel = "STUDY"
         ds.StudyInstanceUID = study_uid
-        for status, _ in assoc.send_c_move(ds, dest_aet, StudyRootQueryRetrieveInformationModelMove):
+        for status, _ in assoc.send_c_move(
+            ds, dest_aet, StudyRootQueryRetrieveInformationModelMove
+        ):
             if status:
                 statuses.append(int(status.Status))
         assoc.release()
@@ -165,7 +167,7 @@ def cmove(phase, study_uid, dest_aet):
 
 
 def cmove_ghost(study_uid):
-    statuses = cmove("ghost", study_uid, "GHOST")
+    statuses = cmove(study_uid, "GHOST")
     ac.record_event(result, "cmove_ghost", statuses=statuses, refused=(0xA801 in statuses))
 
 
@@ -190,7 +192,6 @@ def qido_list():
     data = _get_json("/dicom-web/studies")
     studies = [d.get("0020000D", {}).get("Value", [None])[0] for d in (data or [])]
     ac.record_event(result, "qido_list", studies=[s for s in studies if s], ok=bool(data))
-    cyr = STUDY[1]["StudyInstanceUID"]
     fdata = _get_json("/dicom-web/studies?PatientName=" + urllib.parse.quote("Иванов*"))
     fstudies = [d.get("0020000D", {}).get("Value", [None])[0] for d in (fdata or [])]
     ac.record_event(result, "qido_filtered", studies=[s for s in fstudies if s], ok=bool(fdata))
@@ -199,7 +200,11 @@ def qido_list():
 def qido_cyrillic():
     s = STUDY[1]["StudyInstanceUID"]
     data = _get_json(f"/dicom-web/studies?StudyInstanceUID={s}")
-    ac.record_event(result, "qido_cyrillic", name=_qido_name(data), ok=(_qido_name(data) == study_plan.CYRILLIC_NAME))
+    ac.record_event(
+        result, "qido_cyrillic",
+        name=_qido_name(data),
+        ok=(_qido_name(data) == study_plan.CYRILLIC_NAME),
+    )
 
 
 def wado(study_idx, kind):
@@ -207,7 +212,11 @@ def wado(study_idx, kind):
     s, se, inst = st["StudyInstanceUID"], st["SeriesInstanceUID"], st["SOPInstanceUIDs"][0]
     meta = _get_json(f"/dicom-web/studies/{s}/metadata")
     count = len(meta) if isinstance(meta, list) else 0
-    frame = _get_bytes(f"/dicom-web/studies/{s}/series/{se}/instances/{inst}/frames/1") if kind == "wado" else b""
+    frame = (
+        _get_bytes(f"/dicom-web/studies/{s}/series/{se}/instances/{inst}/frames/1")
+        if kind == "wado"
+        else b""
+    )
     ev = {"study": s, "metadata_count": count, "ok": count == N}
     if kind == "wado":
         ev["frame_bytes"] = len(frame)
@@ -223,14 +232,17 @@ def main():
             probe_rejected(PACS_HOST, PACS_DICOM, PACS_AET, SELF_AET, "direct_pacs_probe")
             probe_rejected(PROXY_HOST, PROXY_DIMSE, "GHOST", SELF_AET, "spoof_proxy_probe")
             _current_phase["name"] = "s3"
-            cmove("s3", STUDY[3]["StudyInstanceUID"], SELF_AET); drain("s3", STUDY[3]["StudyInstanceUID"], N)
+            cmove(STUDY[3]["StudyInstanceUID"], SELF_AET)
+            drain("s3", STUDY[3]["StudyInstanceUID"], N)
             cmove_ghost(STUDY[3]["StudyInstanceUID"])
             cfind_cyrillic(STUDY[1]["StudyInstanceUID"], study_plan.CYRILLIC_NAME)
             barrier("s5", "a_s5", ["a_s5", "b_s5"])
             _current_phase["name"] = "s5"
-            cmove("s5", STUDY[4]["StudyInstanceUID"], SELF_AET); drain("s5", STUDY[4]["StudyInstanceUID"], N)
+            cmove(STUDY[4]["StudyInstanceUID"], SELF_AET)
+            drain("s5", STUDY[4]["StudyInstanceUID"], N)
             _current_phase["name"] = "s6"
-            cmove("s6", STUDY[6]["StudyInstanceUID"], SELF_AET); drain("s6", STUDY[6]["StudyInstanceUID"], N)
+            cmove(STUDY[6]["StudyInstanceUID"], SELF_AET)
+            drain("s6", STUDY[6]["StudyInstanceUID"], N)
             ac.barrier_signal(BARRIER_DIR, "a_s6_warm")
         else:  # clientb
             qido_list()
@@ -238,7 +250,8 @@ def main():
             qido_cyrillic()
             barrier("s5", "b_s5", ["a_s5", "b_s5"])
             _current_phase["name"] = "s5"
-            cmove("s5", STUDY[5]["StudyInstanceUID"], SELF_AET); drain("s5", STUDY[5]["StudyInstanceUID"], N)
+            cmove(STUDY[5]["StudyInstanceUID"], SELF_AET)
+            drain("s5", STUDY[5]["StudyInstanceUID"], N)
             ac.barrier_wait_all(BARRIER_DIR, ["a_s6_warm"], timeout=600)
             wado(6, "wado_cached")
         time.sleep(5)

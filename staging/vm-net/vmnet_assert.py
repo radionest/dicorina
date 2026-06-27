@@ -59,7 +59,7 @@ def check_s1(clientb, studies, cyrillic_study):
     return fails
 
 
-def check_s2(clientb, study, n):
+def check_s2(clientb, study, n):  # noqa: ARG001
     fails = []
     e = event(clientb, "wado")
     if e is None or not e.get("ok"):
@@ -117,7 +117,9 @@ def check_s5(clienta, clientb, study_a, study_b, n):
 def check_s6(clienta, clientb, study, n):
     fails = []
     if received_count(clienta, "s6", study) != n:
-        fails.append(f"S6: clienta DIMSE warm incomplete ({received_count(clienta, 's6', study)}/{n})")
+        fails.append(
+            f"S6: clienta DIMSE warm incomplete ({received_count(clienta, 's6', study)}/{n})"
+        )
     e = event(clientb, "wado_cached")
     if e is None or not e.get("ok"):
         fails.append(f"S6: clientb HTTP read of warmed study failed ({e!r})")
