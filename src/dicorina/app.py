@@ -81,8 +81,10 @@ def create_app(config: DicorinaConfig) -> FastAPI:
 
     from dicorina.deps import verify_token
     from dicorina.http_face.qido import router as qido_router
+    from dicorina.http_face.wado import router as wado_router
 
     app.include_router(qido_router, prefix="/dicom-web", dependencies=[Depends(verify_token)])
+    app.include_router(wado_router, prefix="/dicom-web", dependencies=[Depends(verify_token)])
 
     @app.get("/health")
     async def health() -> dict:

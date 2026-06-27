@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import asyncio
+import io
+import tempfile
+from typing import IO, TYPE_CHECKING, Any
 
+import pydicom
 from dimsechord import (
+    SeriesQuery,
+    build_multipart_response,
+    convert_datasets_to_dicom_json,
+    extract_frames_from_dataset,
     image_result_to_dicom_json,
     series_result_to_dicom_json,
     study_result_to_dicom_json,
@@ -81,3 +89,55 @@ class ProxyService:
         out = [image_result_to_dicom_json(r) for r in results]
         self._qido.put(key, out)
         return out
+
+    async def study_metadata(self, study_uid: str, base_url: str) -> list[dict[str, Any]]:
+        series = await self._client.find_series(
+            SeriesQuery(study_instance_uid=study_uid),
+            self._pacs,
+            timeout=self._cfind_timeout,
+        )
+        series_uids = [s.series_instance_uid for s in series]
+        datasets = [ds async for ds in self._engine.stream_study(study_uid, series_uids)]
+        return await asyncio.to_thread(
+            convert_datasets_to_dicom_json, datasets, base_url
+        )
+
+    async def series_metadata(
+        self, study_uid: str, series_uid: str, base_url: str
+    ) -> list[dict[str, Any]]:
+        cached = await self._engine.ensure_series(study_uid, series_uid)
+        return await asyncio.to_thread(
+            convert_datasets_to_dicom_json, list(cached.instances.values()), base_url
+        )
+
+    async def _instance_dataset(self, study_uid, series_uid, instance_uid):  # type: ignore[no-untyped-def]
+        mem = self._cache.get_series_from_memory(study_uid, series_uid)
+        if mem is not None and instance_uid in mem.instances:
+            return mem.instances[instance_uid]
+        disk = self._cache.read_instance(study_uid, series_uid, instance_uid)
+        if disk is not None:
+            return disk
+        cached = await self._engine.ensure_series(study_uid, series_uid)
+        if instance_uid not in cached.instances:
+            raise KeyError(instance_uid)
+        return cached.instances[instance_uid]
+
+    async def frames(
+        self, study_uid: str, series_uid: str, instance_uid: str, frame_numbers: list[int]
+    ) -> tuple[bytes, str]:
+        ds = await self._instance_dataset(study_uid, series_uid, instance_uid)
+        frames = extract_frames_from_dataset(ds, frame_numbers)
+        return build_multipart_response(frames)
+
+    async def instance(self, study_uid: str, series_uid: str, instance_uid: str) -> bytes:
+        ds = await self._instance_dataset(study_uid, series_uid, instance_uid)
+        buf = io.BytesIO()
+        await asyncio.to_thread(pydicom.dcmwrite, buf, ds, enforce_file_format=True)
+        return buf.getvalue()
+
+    async def series_zip(self, study_uid: str, series_uid: str) -> IO[bytes]:
+        cached = await self._engine.ensure_series(study_uid, series_uid)
+        spooled = tempfile.SpooledTemporaryFile(max_size=50 * 1024 * 1024)  # noqa: SIM115
+        await asyncio.to_thread(self._cache.build_series_zip, cached, spooled)
+        spooled.seek(0)
+        return spooled
