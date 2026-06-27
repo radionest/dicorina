@@ -120,4 +120,26 @@ def create_app(config: DicorinaConfig) -> FastAPI:
         h = app.state.health
         return h if isinstance(h, dict) else h.snapshot()
 
+    if config.ohif.enabled:
+        from pathlib import Path
+
+        from fastapi import Request
+        from fastapi.responses import Response
+
+        from dicorina.http_face.ohif import inject_datasources, render_datasources_js
+
+        _tpl = (Path(__file__).parent / "http_face" / "app-config.js").read_text(
+            encoding="utf-8"
+        )
+
+        @app.get("/ohif/app-config.js")
+        async def ohif_config(request: Request) -> Response:
+            js = render_datasources_js(
+                friendly_name=config.ohif.friendly_name,
+                base_path=str(request.scope.get("root_path", "")),
+                external_root=config.ohif.external_root,
+            )
+            rendered = inject_datasources(_tpl, js)
+            return Response(rendered or _tpl, media_type="application/javascript")
+
     return app
