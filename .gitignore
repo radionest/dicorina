@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+# Superpowers session artifacts (plans, specs, SDD briefs/reports/diffs)
+.superpowers/
+docs/superpowers/
+# Local cache data
+/cache/
+*.db
