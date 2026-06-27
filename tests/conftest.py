@@ -6,9 +6,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+import httpx
 import pytest
 from pydicom.uid import generate_uid
 
+from dicorina.app import create_app
+from dicorina.config import DicorinaConfig
 from tests.factories import make_instance
 from tests.fake_pacs import FakePacs
 
@@ -51,3 +54,30 @@ def fake_pacs(
         yield pacs
     finally:
         pacs.stop()
+
+
+@pytest.fixture
+async def app_client(fake_pacs, free_port, tmp_path):
+    """Live ASGI app wired to the fake PACS; pool AET registered as move dest."""
+    pool_aet = "DICORINATEST"
+    scp_port = free_port()
+    fake_pacs.register_destination(pool_aet, "127.0.0.1", scp_port)
+    cfg = DicorinaConfig.model_validate(
+        {
+            "pacs": {"host": "127.0.0.1", "port": fake_pacs.port, "aet": fake_pacs.aet},
+            "pool": {"aets": [pool_aet], "per_aet_cap": 1},
+            "scp": {"bind_ip": "127.0.0.1", "port": scp_port},
+            "dimse": {"listen_ip": "127.0.0.1", "listen_port": free_port()},
+            "http": {"bind_host": "127.0.0.1", "bind_port": free_port()},
+            "cache": {"dir": str(tmp_path / "cache"), "qido_ttl_seconds": 0.0},
+            "timeouts": {"cmove": 60.0, "arrival": 30.0, "completion_grace": 2.0},
+            "healthcheck": {"interval_seconds": 9999.0},
+        }
+    )
+    app = create_app(cfg)
+    transport = httpx.ASGITransport(app=app)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://testserver") as client,
+    ):
+        yield client, {"app": app, "pool_aet": pool_aet, "cfg": cfg}
