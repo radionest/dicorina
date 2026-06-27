@@ -1,0 +1,19 @@
+[Unit]
+Description=dicorina DICOM/DICOMweb proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dicorina
+Group=dicorina
+Environment=DICORINA_CONFIG=/etc/dicorina/config.toml
+# Set a token to enforce HTTP auth; leave unset for localhost-only deployments.
+# Environment=DICORINA_AUTH_TOKEN=...
+WorkingDirectory=/opt/dicorina
+ExecStart=/opt/dicorina/.venv/bin/dicorina
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -57,9 +57,7 @@ async def test_cmove_passthrough_to_registered_modality(
 
         ae = AE(ae_title="WORKSTATION")
         ae.add_requested_context(StudyRootQueryRetrieveInformationModelMove)
-        assoc = ae.associate(
-            "127.0.0.1", ctx["cfg"].dimse.listen_port, ae_title=ctx["pool_aet"]
-        )
+        assoc = ae.associate("127.0.0.1", ctx["cfg"].dimse.listen_port, ae_title=ctx["pool_aet"])
         assert assoc.is_established
 
         query = Dataset()
@@ -93,9 +91,7 @@ async def test_cmove_unknown_destination_refused(app_client, seeded_study) -> No
 
         ae = AE(ae_title="GHOST")
         ae.add_requested_context(StudyRootQueryRetrieveInformationModelMove)
-        assoc = ae.associate(
-            "127.0.0.1", ctx["cfg"].dimse.listen_port, ae_title=ctx["pool_aet"]
-        )
+        assoc = ae.associate("127.0.0.1", ctx["cfg"].dimse.listen_port, ae_title=ctx["pool_aet"])
         assert assoc.is_established
         query = Dataset()
         query.QueryRetrieveLevel = "STUDY"

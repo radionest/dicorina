@@ -128,9 +128,7 @@ def create_app(config: DicorinaConfig) -> FastAPI:
 
         from dicorina.http_face.ohif import inject_datasources, render_datasources_js
 
-        _tpl = (Path(__file__).parent / "http_face" / "app-config.js").read_text(
-            encoding="utf-8"
-        )
+        _tpl = (Path(__file__).parent / "http_face" / "app-config.js").read_text(encoding="utf-8")
 
         @app.get("/ohif/app-config.js")
         async def ohif_config(request: Request) -> Response:

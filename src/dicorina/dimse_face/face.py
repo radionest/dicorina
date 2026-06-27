@@ -168,9 +168,7 @@ class DimseFace:
 
         dest_raw = event.move_destination
         dest_aet = (
-            dest_raw.decode().strip()
-            if isinstance(dest_raw, bytes)
-            else str(dest_raw).strip()
+            dest_raw.decode().strip() if isinstance(dest_raw, bytes) else str(dest_raw).strip()
         )
         dest = self._allowlist.resolve(dest_aet)
         if dest is None:
