@@ -94,4 +94,4 @@ enabled = false
 friendly_name = "dicorina"
 # External root URL for the OHIF viewer (e.g., "https://viewer.example.com")
 # If unset, OHIF endpoints are disabled
-external_root = null
+# external_root = "https://viewer.example.com/dicom-web"
