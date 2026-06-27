@@ -1,0 +1,69 @@
+#!/bin/bash
+# Runs inside the proxy VM. Installs dicorina via the REAL deploy/install.sh + systemd
+# (no Orthanc), starts the service from the stand config, waits for both clients, then
+# probes eviction and records proxy.json.
+set -x
+R=/repo/staging/.data/vm-net
+BARRIER="$R/barrier"
+mkdir -p "$R" "$BARRIER"
+exec > >(tee -a "$R/proxy-provision.log" /dev/ttyS0) 2>&1
+
+# dicorina's pyproject pins dimsechord = {path="../dimsechord"}; install.sh does `cd /opt/dicorina`,
+# so the sibling must resolve at /opt/dimsechord.
+cp -a /dimsechord /opt/dimsechord
+
+# uv brings its own managed Python 3.12 (proxy base image Python version is irrelevant).
+export PATH="$HOME/.local/bin:$PATH"
+command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+# install.sh uses relative paths (src/, pyproject.toml, deploy/config.example.toml,
+# deploy/dicorina.service via $OLDPWD) — must be invoked with CWD = repo root.
+(cd /repo && DEST=/opt/dicorina bash /repo/deploy/install.sh)
+install -m 0644 /repo/staging/vm-net/config/proxy.toml /etc/dicorina/config.toml
+systemctl enable --now dicorina
+
+# wait for HTTP readiness
+for _ in $(seq 1 120); do
+  curl -fsS http://localhost:8042/health >/dev/null 2>&1 && break
+  sleep 5
+done
+curl -s http://localhost:8042/health > "$R/proxy-health.json" || true
+touch "$BARRIER/ready_proxy"
+
+# wait until both clients signalled completion (max ~30 min)
+for _ in $(seq 1 360); do
+  [ -f "$BARRIER/ready_clienta_done" ] && [ -f "$BARRIER/ready_clientb_done" ] && break
+  sleep 5
+done
+
+count_studies() { find /var/cache/dicorina -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l; }
+BEFORE=$(count_studies)
+
+# S7: short TTL + tiny cap + short interval, then wait one interval so the in-process loop evicts.
+systemctl stop dicorina
+python3 - <<'PY'
+import re, pathlib
+p = pathlib.Path("/etc/dicorina/config.toml"); t = p.read_text()
+t = re.sub(r"disk_ttl_hours = .*", "disk_ttl_hours = 0", t)
+t = re.sub(r"disk_max_size_gb = .*", "disk_max_size_gb = 0.00001", t)
+t = re.sub(r"eviction_interval_seconds = .*", "eviction_interval_seconds = 5.0", t)
+p.write_text(t)
+PY
+systemctl start dicorina
+sleep 20
+AFTER=$(count_studies)
+journalctl -u dicorina --no-pager | grep -q "Evicted" && EVICTED=true || EVICTED=false
+
+python3 - "$R/proxy.json" "$BEFORE" "$AFTER" "$EVICTED" <<'PY'
+import json, sys
+path, before, after, evicted = sys.argv[1:5]
+json.dump({"role": "proxy", "studies_before_evict": int(before),
+           "studies_after_evict": int(after), "evicted_log_seen": evicted == "true"},
+          open(path, "w", encoding="utf-8"), ensure_ascii=False)
+PY
+
+systemctl stop dicorina
+sync
+touch "$BARRIER/ready_proxy_done"
+touch "$R/proxy-done"
