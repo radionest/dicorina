@@ -11,8 +11,16 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-from dimsechord import ImageQuery, SeriesQuery, StudyQuery
-from pynetdicom import AE, evt
+from dimsechord import (
+    ArrivalTimeoutError,
+    AssociationError,
+    ImageQuery,
+    MoveToSelfError,
+    PoolExhaustedError,
+    SeriesQuery,
+    StudyQuery,
+)
+from pynetdicom import AE, StoragePresentationContexts, evt
 from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     PatientRootQueryRetrieveInformationModelFind,
     PatientRootQueryRetrieveInformationModelMove,
@@ -78,6 +86,11 @@ class DimseFace:
             StudyRootQueryRetrieveInformationModelMove,
         ):
             ae.add_supported_context(cx)
+        # Storage SCU contexts: required for pynetdicom to form the sub-association
+        # that forwards C-STORE instances to the C-MOVE destination (pass-through D7).
+        for scx in StoragePresentationContexts:
+            if scx.abstract_syntax is not None:
+                ae.add_requested_context(scx.abstract_syntax)
         handlers: list[Any] = [
             (evt.EVT_C_ECHO, self._on_echo),
             (evt.EVT_C_FIND, self._on_find),
@@ -147,5 +160,71 @@ class DimseFace:
             yield (0xFF00, to_ds(r))
         yield (0x0000, None)
 
-    def _on_move(self, event: evt.Event) -> Iterator[Any]:  # noqa: ARG002
-        yield (None, None)  # Task 8 implements real pass-through
+    def _on_move(self, event: evt.Event) -> Iterator[Any]:
+        ident = event.identifier
+        level = str(getattr(ident, "QueryRetrieveLevel", "STUDY"))
+        study = str(getattr(ident, "StudyInstanceUID", "") or "")
+        series = str(getattr(ident, "SeriesInstanceUID", "") or "")
+
+        dest_raw = event.move_destination
+        dest_aet = (
+            dest_raw.decode().strip()
+            if isinstance(dest_raw, bytes)
+            else str(dest_raw).strip()
+        )
+        dest = self._allowlist.resolve(dest_aet)
+        if dest is None:
+            logger.warning("C-MOVE to unknown destination AET %r refused", dest_aet)
+            yield (None, None)  # → 0xA801 Move Destination unknown
+            return
+        yield (dest.host, dest.port)
+
+        # Sub-operation count from series-level C-FIND (never instance-level).
+        try:
+            if level == "SERIES" and series:
+                count, iterator = self._series_move(study, series)
+            else:
+                count, iterator = self._study_move(study)
+        except Exception as e:
+            logger.error("C-MOVE planning failed for study=%s: %s", study, e)
+            yield 0
+            yield (0xA702, None)  # Unable to perform sub-operations
+            return
+        yield count
+
+        try:
+            for ds in iterator:
+                if event.is_cancelled:
+                    yield (0xFE00, None)
+                    return
+                yield (0xFF00, ds)
+        except (
+            MoveToSelfError,
+            ArrivalTimeoutError,
+            AssociationError,
+            PoolExhaustedError,
+        ) as e:
+            logger.error("C-MOVE pass-through failed for study=%s: %s", study, e)
+            yield (0xA702, None)
+            return
+
+    def _series_move(self, study: str, series: str) -> tuple[int, Iterator[Dataset]]:
+        results = self._run(
+            self._client.find_series(
+                SeriesQuery(study_instance_uid=study, series_instance_uid=series),
+                self._pacs,
+                timeout=self._cfind_timeout,
+            )
+        )
+        count = sum((r.number_of_series_related_instances or 0) for r in results)
+        return count, self._engine.iter_series(study, series)
+
+    def _study_move(self, study: str) -> tuple[int, Iterator[Dataset]]:
+        results = self._run(
+            self._client.find_series(
+                SeriesQuery(study_instance_uid=study), self._pacs, timeout=self._cfind_timeout
+            )
+        )
+        series_uids = [r.series_instance_uid for r in results]
+        count = sum((r.number_of_series_related_instances or 0) for r in results)
+        return count, self._engine.iter_study(study, series_uids)
