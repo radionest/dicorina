@@ -11,3 +11,5 @@ docs/superpowers/
 # Local cache data
 /cache/
 *.db
+# Claude Code local settings
+.claude/settings.local.json
