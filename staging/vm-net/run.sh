@@ -138,7 +138,8 @@ done
 # change 3: derive PACS observations from the Orthanc association log (feeds S5/S6 only;
 # never a hard gate). NOTE: verify exact Orthanc log phrasing for an incoming C-MOVE at
 # live run and tighten the regex if needed.
-python3 - "$DATA/pacs-orthanc.log" "$DATA/pacs.json" <<'PY'
+if [ -f "$DATA/pacs-orthanc.log" ]; then
+  python3 - "$DATA/pacs-orthanc.log" "$DATA/pacs.json" <<'PY'
 import json, re, sys
 log = open(sys.argv[1], encoding="utf-8", errors="ignore").read()
 callers = re.findall(r'calling AET ([A-Za-z0-9_-]+).*(?:C-MOVE|Move)', log)
@@ -146,6 +147,7 @@ json.dump({"role": "pacs", "move_requests": len(callers),
            "distinct_callers": sorted(set(callers))},
           open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
 PY
+fi
 
 echo "================ vm-net results ================"
 ls -1 "$DATA"/*.json 2>/dev/null || echo "(no result JSON produced)"
