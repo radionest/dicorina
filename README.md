@@ -38,3 +38,14 @@ ufw allow from <PACS_IP> to any port <dimse.listen_port>
 ## Auth
 
 The HTTP API (`/dicom-web/*`) ships open by default (`auth_token = ""`). The HTTP face binds `127.0.0.1` and sits behind Clarinet's nginx reverse proxy (same-origin OHIF). To enforce token authentication, set `DICORINA_AUTH_TOKEN` environment variable or configure `[http] auth_token` in config. When enabled, requests must include either `Authorization: Bearer <token>` or `X-Internal-Token: <token>` header; both use constant-time comparison. Browsers cannot add custom headers, so when authentication is enforced, nginx must inject `X-Internal-Token` on proxied `/dicom-web/` requests (or upgrade to nginx `auth_request` + Clarinet `/api/auth/me`). The DIMSE face (C-MOVE/C-GET/C-FIND) is always protected independently by firewall IP-allowlist, called-AET check, and AET allowlist, regardless of HTTP token setting.
+
+## E2E (multi-VM)
+
+`staging/vm-net/` runs the proxy across 4 QEMU/KVM nodes (Orthanc PACS, dicorina via
+install.sh+systemd, two clients). Build goldens once, then run:
+
+    bash staging/vm-net/build-golden.sh   # cached; FORCE_REBUILD=pacs|client|all
+    bash staging/vm-net/run.sh            # boots all 4, asserts S0-S7 on the host
+
+Env: `WORK=<disk dir>` (default /tmp/dicorina-vm-net), `INSTANCES_PER_STUDY` (default 50),
+`TIMEOUT`. Needs /dev/kvm + uv. Pure-module units run in the normal suite (`uv run pytest`).
