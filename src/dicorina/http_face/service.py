@@ -124,8 +124,8 @@ class ProxyService:
         self, study_uid: str, series_uid: str, instance_uid: str, frame_numbers: list[int]
     ) -> tuple[bytes, str]:
         ds = await self._instance_dataset(study_uid, series_uid, instance_uid)
-        frames = extract_frames_from_dataset(ds, frame_numbers)
-        return build_multipart_response(frames)
+        frames = await asyncio.to_thread(extract_frames_from_dataset, ds, frame_numbers)
+        return await asyncio.to_thread(build_multipart_response, frames)
 
     async def instance(self, study_uid: str, series_uid: str, instance_uid: str) -> bytes:
         ds = await self._instance_dataset(study_uid, series_uid, instance_uid)

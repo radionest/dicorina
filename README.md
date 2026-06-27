@@ -13,7 +13,7 @@ DICORINA_CONFIG=deploy/config.example.toml uv run dicorina
 ### Production (systemd)
 
 1. Copy and edit the example config: `cp deploy/config.example.toml /etc/dicorina/config.toml`
-2. Run `sudo deploy/install.sh` from the project root.
+2. Run `sudo deploy/install.sh` from the project root — this provisions the `dicorina` system user, creates `/var/cache/dicorina`, and sets ownership on the install dir.
 3. Enable and start the service: `systemctl enable --now dicorina`
 
 The unit runs the `dicorina` console script, which reads `DICORINA_CONFIG` and binds uvicorn to

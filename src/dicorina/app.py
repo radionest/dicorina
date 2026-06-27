@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
         pacs=pacs,
         allowlist=DestinationAllowlist(cfg.dimse.allowlist),
         loop=app.state.loop,
-        called_aets=set(pool.aets),
+        called_aets=pool.aets,
         cfind_timeout=cfg.timeouts.cfind,
     )
     dimse.start(cfg.dimse.listen_port, cfg.dimse.listen_ip)

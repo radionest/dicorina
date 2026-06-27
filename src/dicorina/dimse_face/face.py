@@ -54,7 +54,7 @@ class DimseFace:
         pacs: DicomNode,
         allowlist: DestinationAllowlist,
         loop: asyncio.AbstractEventLoop,
-        called_aets: set[str],
+        called_aets: list[str],
         *,
         cfind_timeout: float = 30.0,
         cmove_count_timeout: float = 30.0,
@@ -76,7 +76,9 @@ class DimseFace:
     def start(self, port: int, ip: str = "0.0.0.0") -> None:
         if self._server is not None:
             return
-        ae = AE(ae_title=next(iter(self._called_aets)))
+        # The external C-FIND/C-MOVE face accepts only the primary pool AET as called-AET;
+        # multi-AET pool scaling controls C-MOVE-to-self destinations, not inbound query acceptance.
+        ae = AE(ae_title=self._called_aets[0])
         ae.require_called_aet = True
         for cx in (
             Verification,
