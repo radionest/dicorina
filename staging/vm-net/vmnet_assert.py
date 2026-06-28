@@ -132,8 +132,8 @@ def check_s6(clienta, clientb, study, n):
 
 
 def check_s7(proxy):
-    # evicted_log_seen is recorded but observational per spec §8: INFO 'Evicted' is not
-    # routed to journald by the deployed service (no root logger configured).
+    # Gate on the cached-study count dropping (before > after); the service's INFO 'Evicted'
+    # line is not routed to journald, so it is not observable and is no longer recorded.
     fails = []
     before = proxy.get("studies_before_evict", 0)
     after = proxy.get("studies_after_evict", before)  # missing → after==before → fails

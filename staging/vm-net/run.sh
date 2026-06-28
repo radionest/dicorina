@@ -11,12 +11,20 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null
 . "$REPO/staging/vm-net/net.env"
-WORK="${WORK:-/tmp/dicorina-vm-net}"          # change 1
+WORK="${WORK:-/var/tmp/dicorina-vm-net}"          # change 1
 TIMEOUT="${TIMEOUT:-2400}"
 INSTANCES="${INSTANCES_PER_STUDY:-50}"
 BUSTER="$WORK/buster.qcow2"
 DATA="$REPO/staging/.data/vm-net"
 BARRIER="$DATA/barrier"
+
+# Refuse a tmpfs WORK: the multi-GB golden/overlay qcow2 would live in RAM and starve the guests.
+# mkdir first so the stat check evaluates the intended path even on a not-yet-created WORK.
+mkdir -p "$WORK"
+if [ "$(stat -f -c %T "$WORK" 2>/dev/null)" = tmpfs ]; then
+  echo "FATAL: WORK=$WORK is on tmpfs (RAM-backed). Use a disk path, e.g. WORK=/var/tmp/dicorina-vm-net." >&2
+  exit 1
+fi
 
 # change 7: preflight checks only the three images that actually exist (no proxy golden)
 for img in "$WORK/pacs-golden.qcow2" "$WORK/client-golden.qcow2" "$BUSTER"; do
@@ -104,13 +112,15 @@ ${body#\#!/bin/bash}"
 MNT='mkdir -p /repo; modprobe 9p 2>/dev/null||true; modprobe 9pnet_virtio 2>/dev/null||true; mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any repo /repo; mountpoint -q /repo || true; mkdir -p /dimsechord; mountpoint -q /dimsechord || mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any dimsechord /dimsechord || true'
 
 # --- PACS: start distro Orthanc with the tightened vm-net config (data is baked in) ---
-# change 3: log to pacs-orthanc.log for post-run observation parsing on the host
+# change 3: --verbose so accepted incoming associations log their calling AET; the host then
+# parses pacs-orthanc.log for the S5/S6 distinct-pool-caller observation (default level logs
+# only warnings/errors, so the calling AET of a successful C-MOVE is otherwise never recorded).
 boot_node pacs "$WORK/pacs-golden.qcow2" "$PACS_IP" "$PACS_LAN_MAC" "$PACS_NAT_MAC" 3072 \
 "#!/bin/bash
 set -x
 $MNT
 systemctl stop orthanc 2>/dev/null || true
-/opt/orthanc/bin/Orthanc /repo/staging/vm-net/config/pacs.json > /repo/staging/.data/vm-net/pacs-orthanc.log 2>&1 &
+/opt/orthanc/bin/Orthanc --verbose /repo/staging/vm-net/config/pacs.json > /repo/staging/.data/vm-net/pacs-orthanc.log 2>&1 &
 OPID=\$!
 sleep 6
 curl -s http://localhost:8042/statistics > /repo/staging/.data/vm-net/pacs-stats.json
@@ -150,14 +160,14 @@ while [ ! -f "$DATA/proxy-done" ]; do
   sleep 10; elapsed=$((elapsed + 10))
 done
 
-# change 3: derive PACS observations from the Orthanc association log (feeds S5/S6 only;
-# never a hard gate). NOTE: verify exact Orthanc log phrasing for an incoming C-MOVE at
-# live run and tighten the regex if needed.
+# change 3: derive PACS observations from the Orthanc --verbose log (feeds S5/S6 only; never a
+# hard gate). Orthanc logs each incoming C-MOVE as "Incoming Move request from AET <caller>";
+# distinct callers prove the AET pool leased DICORINA1/DICORINA2 across the concurrent moves.
 if [ -f "$DATA/pacs-orthanc.log" ]; then
   python3 - "$DATA/pacs-orthanc.log" "$DATA/pacs.json" <<'PY'
 import json, re, sys
 log = open(sys.argv[1], encoding="utf-8", errors="ignore").read()
-callers = re.findall(r'calling AET ([A-Za-z0-9_-]+).*(?:C-MOVE|Move)', log)
+callers = re.findall(r'Incoming Move request from AET ([A-Za-z0-9_-]+)', log)
 json.dump({"role": "pacs", "move_requests": len(callers),
            "distinct_callers": sorted(set(callers))},
           open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)

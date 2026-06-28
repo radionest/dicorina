@@ -12,7 +12,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null
 . "$REPO/staging/vm-net/net.env"
-WORK="${WORK:-/tmp/dicorina-vm-net}"
+WORK="${WORK:-/var/tmp/dicorina-vm-net}"
 TIMEOUT="${TIMEOUT:-2400}"
 STUDIES="${STUDIES:-6}"
 INSTANCES="${INSTANCES_PER_STUDY:-50}"
@@ -26,6 +26,11 @@ if [ "${1:-}" = "--check" ]; then
 fi
 
 mkdir -p "$WORK"
+# Refuse a tmpfs WORK: the multi-GB golden/overlay qcow2 would live in RAM and starve the guests.
+if [ "$(stat -f -c %T "$WORK" 2>/dev/null)" = tmpfs ]; then
+  echo "FATAL: WORK=$WORK is on tmpfs (RAM-backed). Use a disk path, e.g. WORK=/var/tmp/dicorina-vm-net." >&2
+  exit 1
+fi
 if [ ! -f "$BASE" ]; then
   echo "Downloading Debian 10 Buster cloud image (resumable)..."
   ok=0
