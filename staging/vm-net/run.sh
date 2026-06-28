@@ -19,6 +19,8 @@ DATA="$REPO/staging/.data/vm-net"
 BARRIER="$DATA/barrier"
 
 # Refuse a tmpfs WORK: the multi-GB golden/overlay qcow2 would live in RAM and starve the guests.
+# mkdir first so the stat check evaluates the intended path even on a not-yet-created WORK.
+mkdir -p "$WORK"
 if [ "$(stat -f -c %T "$WORK" 2>/dev/null)" = tmpfs ]; then
   echo "FATAL: WORK=$WORK is on tmpfs (RAM-backed). Use a disk path, e.g. WORK=/var/tmp/dicorina-vm-net." >&2
   exit 1
