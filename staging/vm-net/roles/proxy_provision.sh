@@ -30,12 +30,25 @@ install -m 0644 /repo/staging/vm-net/config/proxy.toml /etc/dicorina/config.toml
 systemctl enable --now dicorina
 
 # wait for HTTP readiness
+HEALTHY=false
 for _ in $(seq 1 120); do
-  curl -fsS http://localhost:8042/health >/dev/null 2>&1 && break
+  if curl -fsS http://localhost:8042/health >/dev/null 2>&1; then HEALTHY=true; break; fi
   sleep 5
 done
 curl -s http://localhost:8042/health > "$R/proxy-health.json" || true
-touch "$BARRIER/ready_proxy"
+if [ "$HEALTHY" = true ]; then
+  touch "$BARRIER/ready_proxy"
+else
+  python3 - "$R/proxy.json" <<'PY'
+import json, sys
+json.dump({"role": "proxy", "studies_before_evict": 0, "studies_after_evict": 0,
+           "evicted_log_seen": False}, open(sys.argv[1], "w", encoding="utf-8"),
+          ensure_ascii=False)
+PY
+  touch "$BARRIER/ready_proxy_done"
+  touch "$R/proxy-done"
+  exit 1
+fi
 
 # wait until both clients signalled completion (max ~30 min)
 for _ in $(seq 1 360); do

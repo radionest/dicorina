@@ -89,3 +89,13 @@ def test_s7_eviction():
     assert va.check_s7({"studies_before_evict": 4})
     # fail: nothing was cached before eviction
     assert va.check_s7({"studies_before_evict": 0, "studies_after_evict": 0})
+
+
+def test_load_results_tolerates_bad_sidecar(tmp_path):
+    (tmp_path / "clienta.json").write_text(
+        '{"role":"clienta","aet":"CLIENTA","received":{},"events":[]}', encoding="utf-8"
+    )
+    (tmp_path / "proxy-health.json").write_bytes(b"")
+    results = va.load_results(str(tmp_path))
+    assert "clienta" in results
+    assert "proxy-health" not in results

@@ -9,8 +9,11 @@ import os
 def load_results(data_dir):
     out = {}
     for p in glob.glob(os.path.join(data_dir, "*.json")):
-        with open(p, encoding="utf-8") as f:
-            out[os.path.splitext(os.path.basename(p))[0]] = json.load(f)
+        try:
+            with open(p, encoding="utf-8") as f:
+                out[os.path.splitext(os.path.basename(p))[0]] = json.load(f)
+        except (json.JSONDecodeError, OSError, ValueError):
+            continue
     return out
 
 
