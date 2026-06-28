@@ -12,6 +12,10 @@ exec > >(tee -a "$R/proxy-provision.log" /dev/ttyS0) 2>&1
 # so the sibling must resolve at /opt/dimsechord.
 cp -a /dimsechord /opt/dimsechord
 
+# cloud-init's runcmd runs role.sh with HOME unset; uv installs to /root/.local/bin, but
+# "$HOME/.local/bin" then expands to "/.local/bin", leaving uv off install.sh's PATH and
+# aborting `uv sync` (set -e) before the service file is laid down. Pin HOME for root.
+export HOME=/root
 # uv brings its own managed Python 3.12 (proxy base image Python version is irrelevant).
 export PATH="$HOME/.local/bin:$PATH"
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
