@@ -43,7 +43,8 @@ guests (the scripts now refuse a tmpfs `WORK`). `INSTANCES_PER_STUDY` must match
 - **S6** cross-face cache — clienta warms study6 via DIMSE; clientb reads it via HTTP (count == N).
 - **S7** eviction — short TTL + tiny cap drops the cached study count.
 
-S5/S6 PACS move-counts and the S7 `Evicted` log line are recorded as observations, not gating asserts.
+S5/S6 PACS move-counts and distinct pool callers (from the Orthanc `--verbose` log) are recorded as
+observations, not gating asserts.
 
 ## Resource budget
 
