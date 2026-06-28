@@ -18,6 +18,12 @@ BUSTER="$WORK/buster.qcow2"
 DATA="$REPO/staging/.data/vm-net"
 BARRIER="$DATA/barrier"
 
+# Refuse a tmpfs WORK: the multi-GB golden/overlay qcow2 would live in RAM and starve the guests.
+if [ "$(stat -f -c %T "$WORK" 2>/dev/null)" = tmpfs ]; then
+  echo "FATAL: WORK=$WORK is on tmpfs (RAM-backed). Use a disk path, e.g. WORK=/var/tmp/dicorina-vm-net." >&2
+  exit 1
+fi
+
 # change 7: preflight checks only the three images that actually exist (no proxy golden)
 for img in "$WORK/pacs-golden.qcow2" "$WORK/client-golden.qcow2" "$BUSTER"; do
   [ -f "$img" ] || { echo "missing $img — run: bash staging/vm-net/build-golden.sh"; exit 1; }

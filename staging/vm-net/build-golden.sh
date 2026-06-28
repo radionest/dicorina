@@ -19,6 +19,13 @@ INSTANCES="${INSTANCES_PER_STUDY:-50}"
 IMG_URL="https://cloud.debian.org/images/cloud/buster/latest/debian-10-generic-amd64.qcow2"
 BASE="$WORK/buster.qcow2"
 
+mkdir -p "$WORK"
+# Refuse a tmpfs WORK: the multi-GB golden/overlay qcow2 would live in RAM and starve the guests.
+if [ "$(stat -f -c %T "$WORK" 2>/dev/null)" = tmpfs ]; then
+  echo "FATAL: WORK=$WORK is on tmpfs (RAM-backed). Use a disk path, e.g. WORK=/var/tmp/dicorina-vm-net." >&2
+  exit 1
+fi
+
 if [ "${1:-}" = "--check" ]; then
   for t in qemu-system-x86_64 qemu-img cloud-localds; do command -v "$t" >/dev/null || { echo "missing $t"; exit 1; }; done
   [ -e /dev/kvm ] || { echo "missing /dev/kvm"; exit 1; }
