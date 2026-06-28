@@ -168,6 +168,9 @@ if [ -f "$WORK/pacs-golden.qcow2.tmp" ]; then
     exit 1
   fi
   mv -f "$WORK/pacs-golden.qcow2.tmp" "$WORK/pacs-golden.qcow2"
+  # persist the count alongside the golden in $WORK (run.sh's preflight reads it; the $DATA copy
+  # above is wiped by run.sh's rm -rf "$DATA" each run, so it only survives the first run)
+  echo "$got" > "$WORK/pacs-golden-count.txt"
   echo "PACS golden import verified: $got instances"
 fi
 build_one client "$WORK/ud-client"

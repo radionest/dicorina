@@ -23,6 +23,21 @@ for img in "$WORK/pacs-golden.qcow2" "$WORK/client-golden.qcow2" "$BUSTER"; do
   [ -f "$img" ] || { echo "missing $img — run: bash staging/vm-net/build-golden.sh"; exit 1; }
 done
 
+# preflight: if the PACS golden bake recorded its instance count, verify it matches this run's expected total.
+# Read from $WORK (alongside the golden, never wiped) — not $DATA, which rm -rf clears below, so the
+# $DATA copy would survive only the first run and miss the "changed INSTANCES, no rebuild" footgun on run #2+.
+_pacs_count_file="$WORK/pacs-golden-count.txt"
+if [ -f "$_pacs_count_file" ]; then
+  _want=$((STUDIES * INSTANCES))
+  _got="$(cat "$_pacs_count_file")"
+  if [ "$_got" != "$_want" ]; then
+    echo "FATAL: PACS golden baked $_got instances but this run expects $_want (STUDIES=$STUDIES INSTANCES_PER_STUDY=$INSTANCES)."
+    echo "  Rebuild: FORCE_REBUILD=pacs bash staging/vm-net/build-golden.sh"
+    echo "  Or match: export INSTANCES_PER_STUDY=$_got before run.sh"
+    exit 1
+  fi
+fi
+
 rm -rf "$DATA"; mkdir -p "$DATA" "$BARRIER"
 PIDS=()
 cleanup() { for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; }
@@ -90,7 +105,7 @@ MNT='mkdir -p /repo; modprobe 9p 2>/dev/null||true; modprobe 9pnet_virtio 2>/dev
 
 # --- PACS: start distro Orthanc with the tightened vm-net config (data is baked in) ---
 # change 3: log to pacs-orthanc.log for post-run observation parsing on the host
-boot_node pacs "$WORK/pacs-golden.qcow2" 10.0.0.10 "$PACS_LAN_MAC" "$PACS_NAT_MAC" 3072 \
+boot_node pacs "$WORK/pacs-golden.qcow2" "$PACS_IP" "$PACS_LAN_MAC" "$PACS_NAT_MAC" 3072 \
 "#!/bin/bash
 set -x
 $MNT
@@ -106,7 +121,7 @@ wait \$OPID"
 # change 4: boot from buster.qcow2, not a golden; provision via proxy_provision.sh; mem 2048
 # NOTE: if uv's managed Python or a wheel needs glibc > 2.28 (Buster), fall back to
 # a Bookworm cloud image for the proxy ONLY — keep PACS/client goldens on Buster.
-boot_node proxy "$BUSTER" 10.0.0.20 "$PROXY_LAN_MAC" "$PROXY_NAT_MAC" 2048 \
+boot_node proxy "$BUSTER" "$PROXY_IP" "$PROXY_LAN_MAC" "$PROXY_NAT_MAC" 2048 \
 "#!/bin/bash
 $MNT
 bash /repo/staging/vm-net/roles/proxy_provision.sh"
@@ -118,15 +133,15 @@ client_body() {  # $1 role, $2 self_aet, $3 scp_port
 set -x
 $MNT
 export ROLE=$1 SELF_AET=$2 SCP_PORT=$3
-export PROXY_HOST=10.0.0.20 PROXY_DIMSE=$PROXY_DIMSE PROXY_HTTP=$PROXY_HTTP PROXY_CALLED_AET=$PROXY_CALLED_AET
-export PACS_HOST=10.0.0.10 PACS_AET=$PACS_AET PACS_DICOM=$PACS_DICOM
+export PROXY_HOST=$PROXY_IP PROXY_DIMSE=$PROXY_DIMSE PROXY_HTTP=$PROXY_HTTP PROXY_CALLED_AET=$PROXY_CALLED_AET
+export PACS_HOST=$PACS_IP PACS_AET=$PACS_AET PACS_DICOM=$PACS_DICOM
 export BARRIER_DIR=/repo/staging/.data/vm-net/barrier RESULT_PATH=/repo/staging/.data/vm-net/$1.json
 export STUDIES=$STUDIES INSTANCES_PER_STUDY=$INSTANCES
 python3 /repo/staging/vm-net/roles/client_agent.py
 touch /repo/staging/.data/vm-net/$1-agent-done"
 }
-boot_node clienta "$WORK/client-golden.qcow2" 10.0.0.31 "$CLIENTA_LAN_MAC" "$CLIENTA_NAT_MAC" 1024 "$(client_body clienta "$CLIENTA_AET" "$CLIENTA_SCP")"
-boot_node clientb "$WORK/client-golden.qcow2" 10.0.0.32 "$CLIENTB_LAN_MAC" "$CLIENTB_NAT_MAC" 1024 "$(client_body clientb "$CLIENTB_AET" "$CLIENTB_SCP")"
+boot_node clienta "$WORK/client-golden.qcow2" "$CLIENTA_IP" "$CLIENTA_LAN_MAC" "$CLIENTA_NAT_MAC" 1024 "$(client_body clienta "$CLIENTA_AET" "$CLIENTA_SCP")"
+boot_node clientb "$WORK/client-golden.qcow2" "$CLIENTB_IP" "$CLIENTB_LAN_MAC" "$CLIENTB_NAT_MAC" 1024 "$(client_body clientb "$CLIENTB_AET" "$CLIENTB_SCP")"
 
 echo "Waiting for proxy-done (timeout ${TIMEOUT}s)..."
 elapsed=0
@@ -157,9 +172,8 @@ if [ -f "$DATA/proxy-done" ]; then
   fi
   # change 6: dicorina env names; add STUDIES; -rP surfaces S5/S6 PACS move-count
   # observations printed by passing tests (pytest hides stdout without -rP under -v)
-  VMNET_DATA="$DATA" INSTANCES_PER_STUDY="$INSTANCES" STUDIES="$STUDIES" \
-    uv run --with pytest pytest --noconftest "$REPO/staging/vm-net/test_vm_net.py" -v -rP
-  gate=$?
+  gate=0; VMNET_DATA="$DATA" INSTANCES_PER_STUDY="$INSTANCES" STUDIES="$STUDIES" \
+    uv run --with pytest pytest --noconftest "$REPO/staging/vm-net/test_vm_net.py" -v -rP || gate=$?
   echo "host gate exit: $gate"
   exit "$gate"
 else

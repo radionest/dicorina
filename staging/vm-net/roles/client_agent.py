@@ -256,9 +256,10 @@ def main():
             wado(6, "wado_cached")
         time.sleep(5)
     finally:
+        # shutdown SCP first: stops _on_store mutations so result dict is stable for json.dump
+        server.shutdown()
         ac.write_result(RESULT_PATH, result)
         ac.barrier_signal(BARRIER_DIR, ROLE + "_done")
-        server.shutdown()
 
 
 if __name__ == "__main__":
