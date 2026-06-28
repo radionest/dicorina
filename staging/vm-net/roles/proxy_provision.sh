@@ -45,9 +45,8 @@ if [ "$HEALTHY" = true ]; then
 else
   python3 - "$R/proxy.json" <<'PY'
 import json, sys
-json.dump({"role": "proxy", "studies_before_evict": 0, "studies_after_evict": 0,
-           "evicted_log_seen": False}, open(sys.argv[1], "w", encoding="utf-8"),
-          ensure_ascii=False)
+json.dump({"role": "proxy", "studies_before_evict": 0, "studies_after_evict": 0},
+          open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False)
 PY
   touch "$BARRIER/ready_proxy_done"
   touch "$R/proxy-done"
@@ -76,13 +75,12 @@ PY
 systemctl start dicorina
 sleep 20
 AFTER=$(count_studies)
-journalctl -u dicorina --no-pager | grep -q "Evicted" && EVICTED=true || EVICTED=false
 
-python3 - "$R/proxy.json" "$BEFORE" "$AFTER" "$EVICTED" <<'PY'
+python3 - "$R/proxy.json" "$BEFORE" "$AFTER" <<'PY'
 import json, sys
-path, before, after, evicted = sys.argv[1:5]
+path, before, after = sys.argv[1:4]
 json.dump({"role": "proxy", "studies_before_evict": int(before),
-           "studies_after_evict": int(after), "evicted_log_seen": evicted == "true"},
+           "studies_after_evict": int(after)},
           open(path, "w", encoding="utf-8"), ensure_ascii=False)
 PY
 

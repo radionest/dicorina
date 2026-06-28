@@ -11,7 +11,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null
 . "$REPO/staging/vm-net/net.env"
-WORK="${WORK:-/tmp/dicorina-vm-net}"          # change 1
+WORK="${WORK:-/var/tmp/dicorina-vm-net}"          # change 1
 TIMEOUT="${TIMEOUT:-2400}"
 INSTANCES="${INSTANCES_PER_STUDY:-50}"
 BUSTER="$WORK/buster.qcow2"
