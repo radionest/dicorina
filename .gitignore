@@ -13,3 +13,5 @@ docs/superpowers/
 *.db
 # Claude Code local settings
 .claude/settings.local.json
+# vm-net runtime artifacts (per-role JSON, logs, barriers)
+staging/.data/
