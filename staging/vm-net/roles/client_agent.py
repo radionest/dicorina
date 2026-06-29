@@ -31,7 +31,7 @@ SCP_PORT = int(os.environ["SCP_PORT"])
 PROXY_HOST = os.environ["PROXY_HOST"]
 PROXY_DIMSE = int(os.environ["PROXY_DIMSE"])
 PROXY_HTTP = int(os.environ["PROXY_HTTP"])
-PROXY_CALLED_AET = os.environ["PROXY_CALLED_AET"]   # = DICORINA1 (pool.aets[0])
+PROXY_CALLED_AET = os.environ["PROXY_CALLED_AET"]   # = DICORINA1 (pool.members[0].aet)
 PACS_HOST = os.environ["PACS_HOST"]
 PACS_AET = os.environ["PACS_AET"]
 PACS_DICOM = int(os.environ["PACS_DICOM"])
