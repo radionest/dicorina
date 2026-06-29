@@ -27,9 +27,10 @@ if TYPE_CHECKING:
 async def lifespan(app: FastAPI):
     cfg: DicorinaConfig = app.state.config
 
-    pool = AssociationPool(cfg.pool.aets, cfg.pool.per_aet_cap)
+    members = cfg.pool.members
+    pool = AssociationPool([m.aet for m in members], cfg.pool.per_aet_cap)
     scp = StorageSCP()
-    scp.start(pool.aets, cfg.scp.port, cfg.scp.bind_ip)
+    scp.start({m.aet: m.port for m in members}, cfg.scp.bind_ip)
     cache = DicomCache(
         cfg.cache.dir,
         ttl_hours=cfg.cache.disk_ttl_hours,

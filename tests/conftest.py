@@ -65,8 +65,8 @@ async def app_client(fake_pacs, free_port, tmp_path):
     cfg = DicorinaConfig.model_validate(
         {
             "pacs": {"host": "127.0.0.1", "port": fake_pacs.port, "aet": fake_pacs.aet},
-            "pool": {"aets": [pool_aet], "per_aet_cap": 1},
-            "scp": {"bind_ip": "127.0.0.1", "port": scp_port},
+            "pool": {"members": [{"aet": pool_aet, "port": scp_port}], "per_aet_cap": 1},
+            "scp": {"bind_ip": "127.0.0.1"},
             "dimse": {"listen_ip": "127.0.0.1", "listen_port": free_port()},
             "http": {"bind_host": "127.0.0.1", "bind_port": free_port()},
             "cache": {"dir": str(tmp_path / "cache"), "qido_ttl_seconds": 0.0},

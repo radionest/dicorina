@@ -19,11 +19,13 @@ port = {fake_pacs.port}
 aet = "{fake_pacs.aet}"
 
 [pool]
-aets = ["DICORINA"]
+
+[[pool.members]]
+aet = "DICORINA"
+port = {scp_port}
 
 [scp]
 bind_ip = "127.0.0.1"
-port = {scp_port}
 
 [dimse]
 listen_ip = "127.0.0.1"
