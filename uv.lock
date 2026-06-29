@@ -144,7 +144,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cachetools", specifier = ">=7.0.0" },
-    { name = "dimsechord", editable = "../dimsechord" },
+    { name = "dimsechord", specifier = ">=0.3.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pydicom", specifier = ">=2.3.1" },
@@ -166,27 +166,15 @@ dev = [
 [[package]]
 name = "dimsechord"
 version = "0.3.0"
-source = { editable = "../dimsechord" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachetools" },
     { name = "pydicom" },
     { name = "pynetdicom" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "cachetools", specifier = ">=7.0.0" },
-    { name = "pydicom", specifier = ">=2.3.1" },
-    { name = "pynetdicom", specifier = ">=3.0.4" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.15.0" },
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest-asyncio", specifier = ">=1.1.0" },
-    { name = "pytest-timeout", specifier = ">=2.4.0" },
-    { name = "ruff" },
+sdist = { url = "https://files.pythonhosted.org/packages/17/8c/5c88942bf8df08de05db8eb2e7e16d219c93592a64e94f3338c8f3b6f0f8/dimsechord-0.3.0.tar.gz", hash = "sha256:72abbc7a1098e2f93a3a7123ccd5c48523e5cd8f0d22de4bdb81bc72568f7e2f", size = 68139, upload-time = "2026-06-28T13:23:28.363Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c9/31/acf7b68e87e1895f452e883f7fa5e883ff26a3673d631e2a246f0288e25a/dimsechord-0.3.0-py3-none-any.whl", hash = "sha256:084c016f1af8b5eb04ff49bce49efcf50dc67f7262e202c3b8c4756736daef44", size = 33439, upload-time = "2026-06-28T13:23:27.001Z" },
 ]
 
 [[package]]
