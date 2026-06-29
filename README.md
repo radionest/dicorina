@@ -1,6 +1,6 @@
 # dicorina
 
-Pure-Python DICOM + DICOMweb pass-through proxy for a C-MOVE-only PACS, built as a thin application layer over the prebuilt `dimsechord` core library (sourced from `../dimsechord` via editable path install). To develop, install dependencies and run tests: `uv sync && uv run pytest`.
+Pure-Python DICOM + DICOMweb pass-through proxy for a C-MOVE-only PACS, built as a thin application layer over the [`dimsechord`](https://pypi.org/project/dimsechord/) core library. To develop, install dependencies and run tests: `uv sync && uv run pytest`.
 
 ## Run / Deploy
 
@@ -21,11 +21,6 @@ The unit runs the `dicorina` console script, which reads `DICORINA_CONFIG` and b
 HTTP on the configured port; the pynetdicom DIMSE AE (C-FIND/C-MOVE/C-ECHO) binds
 `dimse.listen_ip`/`dimse.listen_port` inside the lifespan; eviction and the healthcheck run as
 in-process asyncio tasks.
-
-**`dimsechord` dependency:** `install.sh` runs `uv sync` expecting `../dimsechord` to exist as a
-sibling directory (the path source in `pyproject.toml`). On a deploy host without the sibling
-repo, build a wheel (`uv build ../dimsechord`), add it to the project, or publish `dimsechord` to
-a private index and update `[tool.uv.sources]` accordingly.
 
 **DIMSE port firewall:** the HTTP listener binds `http.bind_host` (default `127.0.0.1`). The
 DIMSE face binds `dimse.listen_ip` (default `0.0.0.0`) and must be reachable from the PACS.
