@@ -86,3 +86,10 @@ def test_duplicate_port_rejected(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError):
         load_config(cfg_file)
+
+
+def test_example_config_is_valid() -> None:
+    example = Path(__file__).parents[2] / "deploy" / "config.example.toml"
+    cfg = load_config(example)
+    assert [m.aet for m in cfg.pool.members] == ["DICORINA"]
+    assert cfg.pool.members[0].port == 11112
