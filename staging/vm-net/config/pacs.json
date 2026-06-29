@@ -16,6 +16,6 @@
   "DicomAlwaysAllowGet": false,
   "DicomModalities": {
     "dicorina1": ["DICORINA1", "10.0.0.20", 11112],
-    "dicorina2": ["DICORINA2", "10.0.0.20", 11112]
+    "dicorina2": ["DICORINA2", "10.0.0.20", 11113]
   }
 }

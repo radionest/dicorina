@@ -6,7 +6,7 @@ import os
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PacsConfig(BaseModel):
@@ -15,14 +15,35 @@ class PacsConfig(BaseModel):
     aet: str = "PACS"
 
 
+class AetPoolMember(BaseModel):
+    aet: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65535)
+
+
 class PoolConfig(BaseModel):
-    aets: list[str] = Field(default_factory=lambda: ["DICORINA"], min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+    members: list[AetPoolMember] = Field(
+        default_factory=lambda: [AetPoolMember(aet="DICORINA", port=11112)],
+        min_length=1,
+    )
     per_aet_cap: int = 1
+
+    @model_validator(mode="after")
+    def _unique_aets_and_ports(self) -> PoolConfig:
+        aets = [m.aet for m in self.members]
+        if len(set(aets)) != len(aets):
+            raise ValueError("pool.members has duplicate AETs")
+        ports = [m.port for m in self.members]
+        if len(set(ports)) != len(ports):
+            raise ValueError("pool.members has duplicate ports")
+        return self
 
 
 class ScpConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     bind_ip: str = "0.0.0.0"
-    port: int = 11112
 
 
 class DimseConfig(BaseModel):

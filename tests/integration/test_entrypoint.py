@@ -12,6 +12,7 @@ async def test_app_boots_from_example_config(tmp_path, fake_pacs, free_port) -> 
     import httpx
 
     scp_port = free_port()
+    scp_port2 = free_port()
     cfg_text = f"""
 [pacs]
 host = "127.0.0.1"
@@ -19,11 +20,17 @@ port = {fake_pacs.port}
 aet = "{fake_pacs.aet}"
 
 [pool]
-aets = ["DICORINA"]
+
+[[pool.members]]
+aet = "DICORINA1"
+port = {scp_port}
+
+[[pool.members]]
+aet = "DICORINA2"
+port = {scp_port2}
 
 [scp]
 bind_ip = "127.0.0.1"
-port = {scp_port}
 
 [dimse]
 listen_ip = "127.0.0.1"
@@ -50,3 +57,5 @@ interval_seconds = 9999.0
     ):
         assert (await c.get("/health")).status_code == 200
         assert app.state.dimse.is_running
+        assert [m.aet for m in app.state.config.pool.members] == ["DICORINA1", "DICORINA2"]
+        assert app.state.pool.aets == ["DICORINA1", "DICORINA2"]

@@ -4,12 +4,18 @@ port = 4242
 aet = "HOSPITALPACS"
 
 [pool]
-aets = ["DICORINA1", "DICORINA2"]
 per_aet_cap = 1
+
+[[pool.members]]
+aet = "DICORINA1"
+port = 11112
+
+[[pool.members]]
+aet = "DICORINA2"
+port = 11113
 
 [scp]
 bind_ip = "0.0.0.0"
-port = 11112
 
 [dimse]
 listen_ip = "0.0.0.0"
