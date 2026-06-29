@@ -6,7 +6,7 @@ import os
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PacsConfig(BaseModel):
@@ -21,6 +21,8 @@ class AetPoolMember(BaseModel):
 
 
 class PoolConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     members: list[AetPoolMember] = Field(
         default_factory=lambda: [AetPoolMember(aet="DICORINA", port=11112)],
         min_length=1,
@@ -39,6 +41,8 @@ class PoolConfig(BaseModel):
 
 
 class ScpConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     bind_ip: str = "0.0.0.0"
 
 

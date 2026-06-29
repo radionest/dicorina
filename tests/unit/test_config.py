@@ -88,6 +88,25 @@ def test_duplicate_port_rejected(tmp_path: Path) -> None:
         load_config(cfg_file)
 
 
+def test_legacy_pool_aets_rejected(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(_MINIMAL + '\n[pool]\naets = ["DICORINA"]\n', encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_config(cfg_file)
+
+
+def test_legacy_scp_port_rejected(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(
+        '[pacs]\nhost = "10.0.0.10"\naet = "HOSPITALPACS"\n'
+        "[scp]\nport = 104\n"
+        '[cache]\ndir = "/var/cache/dicorina"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        load_config(cfg_file)
+
+
 def test_example_config_is_valid() -> None:
     example = Path(__file__).parents[2] / "deploy" / "config.example.toml"
     cfg = load_config(example)

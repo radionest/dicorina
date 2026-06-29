@@ -15,7 +15,12 @@ async def test_two_members_bind_both_ports_and_retrieve(
 ) -> None:
     """Two pool AETs, each on its own port: both listeners bind and retrieval works."""
     aets = ["DICORINA1", "DICORINA2"]
-    ports = {a: free_port() for a in aets}
+    ports: dict[str, int] = {}
+    for a in aets:
+        port = free_port()
+        while port in ports.values():
+            port = free_port()
+        ports[a] = port
     for a in aets:
         fake_pacs.register_destination(a, "127.0.0.1", ports[a])
 

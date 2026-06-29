@@ -17,6 +17,7 @@ def test_pacs_knows_only_pool_aets_and_denies_defaults():
     for flag in ALLOW_FLAGS:
         assert pacs[flag] is False, flag
     mods = pacs["DicomModalities"]
+    assert set(mods) == {"dicorina1", "dicorina2"}
     assert {m[0] for m in mods.values()} == {"DICORINA1", "DICORINA2"}
     assert mods["dicorina1"] == ["DICORINA1", "10.0.0.20", 11112]
     assert mods["dicorina2"] == ["DICORINA2", "10.0.0.20", 11113]
