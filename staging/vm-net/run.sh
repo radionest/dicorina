@@ -76,8 +76,7 @@ EOF
   # config does not render on Buster, and the golden images carry a stale
   # /etc/network/interfaces that leaves the LAN NIC without its IPv4. Assign the LAN
   # static IP and DHCP the NAT NIC directly from /sys/class/net.
-  # change 2: netup also mounts the dimsechord 9p share (harmless on non-proxy nodes)
-  local netup="for _a in /sys/class/net/*/address; do _m=\$(cat \"\$_a\"); _i=\$(basename \"\$(dirname \"\$_a\")\"); [ \"\$_i\" = lo ] && continue; if [ \"\$_m\" = \"$lanmac\" ]; then ip link set \"\$_i\" up; ip addr add $ip/24 dev \"\$_i\" 2>/dev/null; fi; if [ \"\$_m\" = \"$natmac\" ]; then ip link set \"\$_i\" up; dhclient \"\$_i\" 2>/dev/null & fi; done; sleep 3; mkdir -p /repo; modprobe 9p 2>/dev/null||true; modprobe 9pnet_virtio 2>/dev/null||true; mountpoint -q /repo || mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any repo /repo 2>/dev/null; mkdir -p /dimsechord; mountpoint -q /dimsechord || mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any dimsechord /dimsechord 2>/dev/null; { echo == $name ==; ip -br addr; echo ROUTE; ip route; echo CONN; python3 -c \"import socket; s=socket.socket(); s.settimeout(4); print('proxy8042', s.connect_ex(('10.0.0.20',8042))); s2=socket.socket(); s2.settimeout(4); print('pacs4242', s2.connect_ex(('10.0.0.10',4242)))\"; } > /repo/staging/.data/vm-net/netdiag-$name.txt 2>&1"
+  local netup="for _a in /sys/class/net/*/address; do _m=\$(cat \"\$_a\"); _i=\$(basename \"\$(dirname \"\$_a\")\"); [ \"\$_i\" = lo ] && continue; if [ \"\$_m\" = \"$lanmac\" ]; then ip link set \"\$_i\" up; ip addr add $ip/24 dev \"\$_i\" 2>/dev/null; fi; if [ \"\$_m\" = \"$natmac\" ]; then ip link set \"\$_i\" up; dhclient \"\$_i\" 2>/dev/null & fi; done; sleep 3; mkdir -p /repo; modprobe 9p 2>/dev/null||true; modprobe 9pnet_virtio 2>/dev/null||true; mountpoint -q /repo || mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any repo /repo 2>/dev/null; { echo == $name ==; ip -br addr; echo ROUTE; ip route; echo CONN; python3 -c \"import socket; s=socket.socket(); s.settimeout(4); print('proxy8042', s.connect_ex(('10.0.0.20',8042))); s2=socket.socket(); s2.settimeout(4); print('pacs4242', s2.connect_ex(('10.0.0.10',4242)))\"; } > /repo/staging/.data/vm-net/netdiag-$name.txt 2>&1"
   local role="#!/bin/bash
 $netup
 ${body#\#!/bin/bash}"
@@ -93,14 +92,11 @@ ${body#\#!/bin/bash}"
 
   cloud-localds --network-config "$WORK/netcfg-$name" "$WORK/seed-$name.iso" "$WORK/ud-$name" "$WORK/meta-$name"
 
-  # change 2: expose the dimsechord sibling repo via a second 9p device
   qemu-system-x86_64 -enable-kvm -m "$mem" -smp 2 \
     -drive file="$overlay",if=virtio,format=qcow2 \
     -drive file="$WORK/seed-$name.iso",if=virtio,format=raw \
     -fsdev local,id=repo,path="$REPO",security_model=mapped-xattr \
     -device virtio-9p-pci,fsdev=repo,mount_tag=repo \
-    -fsdev local,id=dch,path="$REPO/../dimsechord",security_model=mapped-xattr \
-    -device virtio-9p-pci,fsdev=dch,mount_tag=dimsechord \
     -netdev user,id=nat -device virtio-net-pci,netdev=nat,mac="$natmac" \
     -netdev socket,mcast="$MCAST",id=lan -device virtio-net-pci,netdev=lan,mac="$lanmac" \
     -serial file:"$DATA/$name-console.log" -display none -pidfile "$WORK/$name.pid" &
@@ -108,8 +104,7 @@ ${body#\#!/bin/bash}"
   echo "booted $name ($ip)"
 }
 
-# change 2: MNT helper also mounts dimsechord (harmless on non-proxy nodes)
-MNT='mkdir -p /repo; modprobe 9p 2>/dev/null||true; modprobe 9pnet_virtio 2>/dev/null||true; mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any repo /repo; mountpoint -q /repo || true; mkdir -p /dimsechord; mountpoint -q /dimsechord || mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any dimsechord /dimsechord || true'
+MNT='mkdir -p /repo; modprobe 9p 2>/dev/null||true; modprobe 9pnet_virtio 2>/dev/null||true; mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any repo /repo; mountpoint -q /repo || true'
 
 # --- PACS: start distro Orthanc with the tightened vm-net config (data is baked in) ---
 # change 3: --verbose so accepted incoming associations log their calling AET; the host then
