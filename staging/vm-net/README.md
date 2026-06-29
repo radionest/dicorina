@@ -25,8 +25,8 @@ guests (the scripts now refuse a tmpfs `WORK`). `INSTANCES_PER_STUDY` must match
   v2 net-config does not render on the Debian base; nodes are addressed by IP, not hostname).
 - **PACS = LSB Orthanc** (no plugins). Studies are generated and bulk-imported once at golden-build time and
   baked into `/var/lib/orthanc/db`.
-- **proxy = the real artifact.** Rebuilt each run from `deploy/install.sh`; the sibling `dimsechord` is exposed
-  over a second 9p device (`mount_tag=dimsechord`) and copied to `/opt/dimsechord` so the path-dep resolves.
+- **proxy = the real artifact.** Rebuilt each run from `deploy/install.sh`; `dimsechord` resolves from PyPI
+  during `uv sync` (pulled over the NAT NIC).
 - **Coordination + results** flow through the 9p-shared `staging/.data/vm-net/` (gitignored): per-role JSON,
   9p barrier files, console logs, `netdiag-<node>.txt`.
 - **Host gate.** `run.sh` waits for `proxy-done`, then runs `test_vm_net.py` on the host — it asserts over the

@@ -8,10 +8,6 @@ BARRIER="$R/barrier"
 mkdir -p "$R" "$BARRIER"
 exec > >(tee -a "$R/proxy-provision.log" /dev/ttyS0) 2>&1
 
-# dicorina's pyproject pins dimsechord = {path="../dimsechord"}; install.sh does `cd /opt/dicorina`,
-# so the sibling must resolve at /opt/dimsechord.
-cp -a /dimsechord /opt/dimsechord
-
 # cloud-init's runcmd runs role.sh with HOME unset; uv installs to /root/.local/bin, but
 # "$HOME/.local/bin" then expands to "/.local/bin", leaving uv off install.sh's PATH and
 # aborting `uv sync` (set -e) before the service file is laid down. Pin HOME for root.
