@@ -12,6 +12,8 @@ DICORINA_CONFIG=deploy/config.example.toml uv run dicorina
 
 ### Production (systemd)
 
+The server needs only Python 3.12 with the `venv` module (e.g. `python3.12-venv` on Debian/Ubuntu) — `uv` is **not** required. `install.sh` creates a `.venv` under the install dir and `pip install`s the package and its dependencies (including `dimsechord`) from PyPI.
+
 1. Copy and edit the example config: `cp deploy/config.example.toml /etc/dicorina/config.toml`
 2. Run `sudo deploy/install.sh` from the project root — this provisions the `dicorina` system user, creates `/var/cache/dicorina`, and sets ownership on the install dir.
 3. Enable and start the service: `systemctl enable --now dicorina`
