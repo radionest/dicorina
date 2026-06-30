@@ -3,6 +3,9 @@ set -euo pipefail
 DEST="${DEST:-/opt/dicorina}"
 PYTHON="${PYTHON:-python3.12}"
 
+command -v "$PYTHON" >/dev/null 2>&1 || { echo "error: '$PYTHON' not found (set PYTHON= to override)" >&2; exit 1; }
+"$PYTHON" -c 'import ensurepip, venv' 2>/dev/null || { echo "error: '$PYTHON' lacks the venv module; install the python3.12-venv package" >&2; exit 1; }
+
 mkdir -p "$DEST" /etc/dicorina
 cp -r src pyproject.toml "$DEST"/
 [ -f /etc/dicorina/config.toml ] || cp deploy/config.example.toml /etc/dicorina/config.toml
