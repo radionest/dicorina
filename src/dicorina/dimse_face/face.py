@@ -120,7 +120,10 @@ class DimseFace:
         try:
             return future.result(timeout=wall_clock)
         except FuturesTimeout as exc:
-            # Bare future timeouts stringify to "" — re-raise with a readable message.
+            if future.done():
+                # TimeoutError raised inside the coroutine (== builtin in 3.12) — keep its text.
+                raise
+            # future.result timed out with the coroutine still running; its str() is "".
             raise TimeoutError(
                 f"upstream DICOM call did not finish within {wall_clock:.0f}s wall-clock "
                 f"(PACS slow or returned too many results)"

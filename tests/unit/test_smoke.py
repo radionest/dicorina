@@ -12,15 +12,15 @@ def test_dimsechord_is_available() -> None:
     assert DicomClient and PullEngine and StorageSCP
 
 
-def test_create_app_silences_pydicom_value_warnings(tmp_path) -> None:
+def test_configure_pydicom_ignores_value_warnings() -> None:
     import pydicom.config
 
-    from dicorina.app import create_app
-    from dicorina.config import DicorinaConfig
+    from dicorina.app import _configure_pydicom
 
-    pydicom.config.settings.reading_validation_mode = pydicom.config.WARN
-    cfg = DicorinaConfig.model_validate(
-        {"pacs": {"host": "127.0.0.1"}, "scp": {}, "cache": {"dir": str(tmp_path)}}
-    )
-    create_app(cfg)
-    assert pydicom.config.settings.reading_validation_mode == pydicom.config.IGNORE
+    original = pydicom.config.settings.reading_validation_mode
+    try:
+        pydicom.config.settings.reading_validation_mode = pydicom.config.WARN
+        _configure_pydicom()
+        assert pydicom.config.settings.reading_validation_mode == pydicom.config.IGNORE
+    finally:
+        pydicom.config.settings.reading_validation_mode = original

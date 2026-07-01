@@ -23,8 +23,17 @@ if TYPE_CHECKING:
     from dicorina.config import DicorinaConfig
 
 
+def _configure_pydicom() -> None:
+    # We relay datasets from upstream PACS verbatim; their VR violations are not ours
+    # to fix and otherwise flood the journal with one pydicom warning per result.
+    import pydicom.config
+
+    pydicom.config.settings.reading_validation_mode = pydicom.config.IGNORE
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _configure_pydicom()
     cfg: DicorinaConfig = app.state.config
 
     members = cfg.pool.members
@@ -103,12 +112,6 @@ async def lifespan(app: FastAPI):
 
 
 def create_app(config: DicorinaConfig) -> FastAPI:
-    # We relay datasets from upstream PACS verbatim; their VR violations are not ours
-    # to fix and otherwise flood the journal with one pydicom warning per result.
-    import pydicom.config
-
-    pydicom.config.settings.reading_validation_mode = pydicom.config.IGNORE
-
     app = FastAPI(title="dicorina", lifespan=lifespan)
     app.state.config = config
     register_exception_handlers(app)
