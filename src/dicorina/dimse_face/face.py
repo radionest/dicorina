@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import TYPE_CHECKING, Any
 
 from dimsechord import (
@@ -114,8 +115,16 @@ class DimseFace:
 
     def _run(self, coro: Any) -> Any:
         """Run an async DicomClient call from this pynetdicom worker thread."""
+        wall_clock = self._cfind_timeout + 5.0
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result(timeout=self._cfind_timeout + 5.0)
+        try:
+            return future.result(timeout=wall_clock)
+        except FuturesTimeout as exc:
+            # Bare future timeouts stringify to "" — re-raise with a readable message.
+            raise TimeoutError(
+                f"upstream DICOM call did not finish within {wall_clock:.0f}s wall-clock "
+                f"(PACS slow or returned too many results)"
+            ) from exc
 
     def _on_find(self, event: evt.Event) -> Iterator[tuple[int, Dataset | None]]:
         ident = event.identifier
@@ -152,7 +161,13 @@ class DimseFace:
                 )
                 to_ds = image_to_dataset
         except Exception as e:
-            logger.error("DIMSE C-FIND failed: %s", e)
+            logger.exception(
+                "DIMSE C-FIND failed [%s] (level=%s study=%s series=%s)",
+                type(e).__name__,
+                level,
+                study or "-",
+                series or "-",
+            )
             yield (0xC000, None)  # Unable to process
             return
         for r in results:
@@ -186,7 +201,7 @@ class DimseFace:
             else:
                 count, iterator = self._study_move(study)
         except Exception as e:
-            logger.error("C-MOVE planning failed for study=%s: %s", study, e)
+            logger.exception("C-MOVE planning failed [%s] for study=%s", type(e).__name__, study)
             yield 0
             yield (0xA702, None)  # Unable to perform sub-operations
             return
@@ -204,7 +219,9 @@ class DimseFace:
             AssociationError,
             PoolExhaustedError,
         ) as e:
-            logger.error("C-MOVE pass-through failed for study=%s: %s", study, e)
+            logger.exception(
+                "C-MOVE pass-through failed [%s] for study=%s", type(e).__name__, study
+            )
             yield (0xA702, None)
             return
 
