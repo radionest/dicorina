@@ -73,12 +73,41 @@ def _resolve_tag(name: str) -> BaseTag:
     return Tag(tag)
 
 
+_INT_VRS = {"US", "UL", "SS", "SL", "SV", "UV"}
+_FLOAT_VRS = {"FL", "FD"}
+_BINARY_VRS = {"OB", "OD", "OF", "OL", "OV", "OW", "UN"}
+
+
+def _coerce(vr: str, value: str) -> object:
+    if value == "":
+        return None  # universal matching: zero-length element
+    if vr in _INT_VRS:
+        return int(value)
+    if vr in _FLOAT_VRS:
+        return float(value)
+    if vr == "AT":
+        return Tag(int(value, 16))
+    return value
+
+
 def _set_element(ds: Dataset, tag: BaseTag, value: str) -> None:
     try:
         vr = dictionary_VR(tag)
     except KeyError:
         raise HTTPException(status_code=400, detail=f"Unknown DICOM tag: {tag}") from None
-    ds.add_new(tag, vr, value)
+    vr = vr.split(" or ")[0]  # ambiguous VRs ("US or SS", "OB or OW"): first alternative
+    if vr in _BINARY_VRS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Attribute {tag} (VR {vr}) cannot be used as a QIDO matching key",
+        )
+    try:
+        coerced = _coerce(vr, value)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid value for {tag} (VR {vr}): {value!r}"
+        ) from None
+    ds.add_new(tag, vr, coerced)
 
 
 def build_identifier(
@@ -94,7 +123,7 @@ def build_identifier(
     ds.SpecificCharacterSet = _CHARSET
     ds.QueryRetrieveLevel = level
     for keyword in _DEFAULT_KEYS[level]:
-        setattr(ds, keyword, "")
+        _set_element(ds, _resolve_tag(keyword), "")
     for name, value in params.items():
         if name in _RESERVED:
             continue

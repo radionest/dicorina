@@ -63,7 +63,6 @@ filterwarnings = [
     "ignore:.*is_little_endian.*:DeprecationWarning:pydicom",
     "ignore:.*is_implicit_VR.*:DeprecationWarning:pydicom",
     "ignore:.*Invalid value for VR UI.*:UserWarning:pydicom",
-    "ignore:.*cannot be assigned to a tag with VR US.*:UserWarning:pydicom",
     "ignore:.*Unknown encoding.*:UserWarning:pydicom",
     "ignore::ResourceWarning:pynetdicom",
 ]

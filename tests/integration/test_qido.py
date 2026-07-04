@@ -163,6 +163,22 @@ async def test_qido_cache_hit_is_byte_identical(app_client, fake_pacs) -> None:
 
 
 @pytest.mark.asyncio
+async def test_qido_numeric_vr_filter_roundtrip(app_client, fake_pacs, seeded_study) -> None:
+    client, _ = app_client
+    study, series = seeded_study["study"][0], seeded_study["series"][0]
+    resp = await client.get(f"/dicom-web/studies/{study}/series/{series}/instances?Rows=512")
+    assert resp.status_code == 200  # was 500 before the VR coercion fix
+    assert int(fake_pacs.find_identifiers[-1].Rows) == 512
+
+
+@pytest.mark.asyncio
+async def test_qido_invalid_numeric_value_is_400(app_client) -> None:
+    client, _ = app_client
+    resp = await client.get("/dicom-web/studies?Rows=abc")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_qido_disconnect_releases_upstream(app_client, fake_pacs) -> None:
     client, _ = app_client
     _seed_extra_studies(fake_pacs, 5)
