@@ -165,15 +165,21 @@ class ProxyService:
         def chunks() -> Iterator[bytes]:
             # Conversion overlaps C-STORE arrival in this producer thread
             # instead of collect-then-convert.
+            it = make_iter()
             first = True
-            for ds in make_iter():
-                payload = json.dumps(
-                    dataset_to_dicom_json(ds, base_url),
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                ).encode()
-                yield (b"[" if first else b",") + payload
-                first = False
+            try:
+                for ds in it:
+                    payload = json.dumps(
+                        dataset_to_dicom_json(ds, base_url),
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    ).encode()
+                    yield (b"[" if first else b",") + payload
+                    first = False
+            finally:
+                # break/close → upstream abort + C-MOVE lease release, deterministic
+                # instead of waiting on GC to collect the generator.
+                it.close()
             yield b"]" if not first else b"[]"
 
         async def stream() -> AsyncIterator[bytes]:

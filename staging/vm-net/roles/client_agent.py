@@ -208,7 +208,11 @@ def cfind_filtered(expect_study):
 
 
 def qido_chunked_probe():
-    url = f"http://{PROXY_HOST}:{PROXY_HTTP}/dicom-web/studies"
+    # Cache-bust: a bare "/dicom-web/studies" URL shares its QidoResultCache key with
+    # qido_list()'s prior call, so within the 5s TTL this would be served as a buffered
+    # cache hit (Content-Length, not chunked) regardless of server behavior. A unique
+    # param keeps the cache key distinct so this is always a real streamed MISS.
+    url = f"http://{PROXY_HOST}:{PROXY_HTTP}/dicom-web/studies?PatientID=__chunkprobe__"
     chunked = False
     try:
         with urllib.request.urlopen(url, timeout=15) as r:
