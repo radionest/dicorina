@@ -53,7 +53,9 @@ async def lifespan(app: FastAPI):
     )
     client = DicomClient(calling_aet=pool.aets[0])
 
-    query = QueryEngine(pool, pacs, find_timeout=cfg.timeouts.cfind)
+    query = QueryEngine(
+        pool, pacs, find_timeout=cfg.timeouts.cfind, lease_timeout=cfg.timeouts.find_lease
+    )
     app.state.query = query
 
     from dicorina.http_face.qido_cache import QidoResultCache

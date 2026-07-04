@@ -75,6 +75,7 @@ class TimeoutsConfig(BaseModel):
     cmove: float = 300.0
     arrival: float = 60.0
     completion_grace: float = 5.0
+    find_lease: float = 30.0
 
 
 class HealthcheckConfig(BaseModel):

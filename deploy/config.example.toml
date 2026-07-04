@@ -90,6 +90,8 @@ cmove = 300.0
 arrival = 60.0
 # Grace period after completion signal in seconds
 completion_grace = 5.0
+# Max wait for a free per-AET C-FIND slot before failing (HTTP 503 / DIMSE 0xA700)
+find_lease = 30.0
 
 # Health check configuration
 [healthcheck]

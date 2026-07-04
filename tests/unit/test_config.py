@@ -30,6 +30,7 @@ def test_load_minimal_applies_defaults(tmp_path: Path) -> None:
     assert cfg.http.auth_token == ""
     assert cfg.cache.qido_ttl_seconds == 5.0
     assert cfg.timeouts.cmove == 300.0
+    assert cfg.timeouts.find_lease == 30.0
 
 
 def test_allowlist_and_pool_parse(tmp_path: Path) -> None:
@@ -130,7 +131,9 @@ def test_dimse_aet_and_find_cap_from_toml(tmp_path) -> None:
             "cache": {"dir": str(tmp_path)},
             "dimse": {"aet": "FACE1"},
             "pool": {"members": [{"aet": "P1", "port": 1}], "per_aet_find_cap": 2},
+            "timeouts": {"find_lease": 0.5},
         }
     )
     assert cfg.dimse.aet == "FACE1"
     assert cfg.pool.per_aet_find_cap == 2
+    assert cfg.timeouts.find_lease == 0.5
