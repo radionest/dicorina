@@ -35,13 +35,17 @@ port = 11112
 [scp]
 bind_ip = "0.0.0.0"
 
-# DIMSE send configuration
+# DIMSE face (inbound SCP) configuration
 [dimse]
-# AE Title dicorina presents when initiating DIMSE associations (e.g. C-FIND to PACS)
+# AE Title of dicorina's inbound DIMSE face. External SCUs (e.g. clarinet) must
+# address this exact AET as the called AET — other called AETs are rejected.
+# Also used as the calling AET of the C-STORE sub-associations that deliver
+# C-MOVE results to the destination. Upstream identities toward the PACS come
+# from [[pool.members]], not from this key.
 aet = "DICORINA"
-# IP address for outbound DIMSE associations (typically the local IP visible to PACS)
+# Interface the DIMSE face listens on (0.0.0.0 = all interfaces)
 listen_ip = "0.0.0.0"
-# Port for outbound DIMSE associations (ephemeral; must be routable from PACS back to this host)
+# Port the DIMSE face listens on; external SCUs connect here
 listen_port = 4242
 # Optional: AE Title to IP:port allowlist for security
 # Uncomment to restrict which remote AEs can connect
