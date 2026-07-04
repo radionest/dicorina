@@ -14,6 +14,9 @@ async def test_run_once_evicts_expired(tmp_path) -> None:
     cache = DicomCache(tmp_path / "c", ttl_hours=0, max_size_gb=10.0)
     ds = make_instance("1.2", "1.2.1", "1.2.1.1")
     cache.write_instance("1.2", "1.2.1", "1.2.1.1", ds)
+    # dimsechord 0.5.0: series_cached certifies completeness, so the series must be
+    # marked complete explicitly (write_instance alone no longer implies a cached series).
+    cache.mark_series_complete("1.2", "1.2.1", 1)
     assert cache.series_cached("1.2", "1.2.1")
 
     loop = EvictionLoop(cache, interval_seconds=9999.0)
