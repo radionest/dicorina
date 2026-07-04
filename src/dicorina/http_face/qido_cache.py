@@ -14,6 +14,10 @@ class QidoResultCache:
             maxsize=max_entries, ttl=ttl_seconds if self._enabled else 1.0
         )
 
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
     @staticmethod
     def key(scope: str, params: dict[str, str], includefields: list[str] | None = None) -> str:
         norm = urlencode(sorted(params.items()))

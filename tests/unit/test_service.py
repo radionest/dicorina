@@ -6,6 +6,8 @@ from __future__ import annotations
 import gc
 
 import pytest
+from dimsechord import FindFailedError
+from pydicom import Dataset
 
 from dicorina.http_face import service as service_mod
 from dicorina.http_face.service import ProxyService
@@ -64,3 +66,60 @@ async def test_metadata_stream_closes_upstream_iterator_deterministically(monkey
         assert closed == ["closed"]
     finally:
         gc.enable()
+
+
+async def _drive_sync(make_chunks):
+    """Sync-driving stand-in for dimsechord's thread/queue bridge."""
+    for item in make_chunks():
+        yield item
+
+
+class _SpyQidoCache:
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+        self.puts: list[tuple[str, bytes]] = []
+
+    def put(self, key: str, body: bytes) -> None:
+        self.puts.append((key, body))
+
+
+@pytest.mark.asyncio
+async def test_tee_passes_through_without_buffering_when_cache_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(service_mod, "iter_to_aiter", _drive_sync)
+    spy = _SpyQidoCache(enabled=False)
+    service = ProxyService(None, None, None, None, spy, None)  # type: ignore[arg-type]
+    got = [c async for c in service._tee_into_cache(lambda: iter([b"[", b"]"]), "KEY")]
+    assert got == [b"[", b"]"]
+    assert spy.puts == []
+
+
+@pytest.mark.asyncio
+async def test_tee_caches_complete_body_when_enabled(monkeypatch) -> None:
+    monkeypatch.setattr(service_mod, "iter_to_aiter", _drive_sync)
+    spy = _SpyQidoCache(enabled=True)
+    service = ProxyService(None, None, None, None, spy, None)  # type: ignore[arg-type]
+    got = [c async for c in service._tee_into_cache(lambda: iter([b"[", b"]"]), "KEY")]
+    assert got == [b"[", b"]"]
+    assert spy.puts == [("KEY", b"[]")]
+
+
+class _TwoThenFailQuery:
+    def iter_find(self, identifier, *, model, timeout):  # noqa: ARG002
+        yield make_instance("1.0", "2.0", "3.0")
+        yield make_instance("1.1", "2.1", "3.1")
+        raise FindFailedError(0xA700)
+
+
+@pytest.mark.asyncio
+async def test_qido_stream_mid_failure_yields_prefix_and_never_caches(monkeypatch) -> None:
+    monkeypatch.setattr(service_mod, "iter_to_aiter", _drive_sync)
+    spy = _SpyQidoCache(enabled=True)
+    service = ProxyService(None, None, None, None, spy, _TwoThenFailQuery())  # type: ignore[arg-type]
+    agen = service._qido_stream(Dataset(), "KEY", None, 0)
+    got: list[bytes] = []
+    with pytest.raises(FindFailedError):
+        async for chunk in agen:
+            got.append(chunk)
+    assert len(got) == 2
+    assert got[0].startswith(b"[") and got[1].startswith(b",")
+    assert spy.puts == []

@@ -24,7 +24,7 @@ from pynetdicom.sop_class import (  # type: ignore[attr-defined]
 from dicorina.http_face.params import build_identifier, pagination
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator, Callable, Iterator
 
     from dimsechord import DicomCache, DicomClient, DicomNode, PullEngine, QueryEngine
     from pydicom import Dataset
@@ -134,8 +134,12 @@ class ProxyService:
         return self._tee_into_cache(chunks, cache_key)
 
     async def _tee_into_cache(
-        self, make_chunks: Any, cache_key: str
+        self, make_chunks: Callable[[], Iterator[bytes]], cache_key: str
     ) -> AsyncIterator[bytes]:
+        if not self._qido.enabled:
+            async for chunk in iter_to_aiter(make_chunks):
+                yield chunk
+            return
         buf: list[bytes] = []
         async for chunk in iter_to_aiter(make_chunks):
             buf.append(chunk)
