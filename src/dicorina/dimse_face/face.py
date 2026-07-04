@@ -116,13 +116,11 @@ class DimseFace:
 
     def _on_find(self, event: evt.Event) -> Iterator[tuple[int, Dataset | None]]:
         model = event.context.abstract_syntax  # Patient/Study Root, as negotiated
-        gen = self._query.iter_find(event.identifier, model=model)
+        gen = self._query.iter_find(event.identifier, model=model, timeout=self._cfind_timeout)
         try:
             for ds in gen:
                 if event.is_cancelled:
-                    # abort upstream, release the find lease
-                    gen.close()  # type: ignore[attr-defined]
-                    yield (0xFE00, None)
+                    yield (0xFE00, None)  # upstream released in finally
                     return
                 yield (0xFF00, ds)  # same SCP thread, no event loop hop
         except (PoolExhaustedError, AssociationError) as e:
@@ -137,6 +135,10 @@ class DimseFace:
             logger.error("DIMSE C-FIND failed: %s", e)
             yield (0xC000, None)
             return
+        finally:
+            # break/close/GeneratorExit → upstream abort + find-lease release,
+            # deterministic instead of waiting on GC (mirrors the HTTP path).
+            gen.close()  # type: ignore[attr-defined]
         yield (0x0000, None)
 
     def _on_move(self, event: evt.Event) -> Iterator[Any]:
