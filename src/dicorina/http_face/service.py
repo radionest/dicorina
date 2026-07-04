@@ -12,7 +12,7 @@ import pydicom
 from dimsechord import (
     SeriesQuery,
     build_multipart_response,
-    convert_datasets_to_dicom_json,
+    dataset_to_dicom_json,
     dataset_to_qido_json,
     extract_frames_from_dataset,
     iter_to_aiter,
@@ -143,23 +143,44 @@ class ProxyService:
         # Reached only on a complete, error-free stream (']' emitted).
         self._qido.put(cache_key, b"".join(buf))
 
-    async def study_metadata(self, study_uid: str, base_url: str) -> list[dict[str, Any]]:
+    async def study_metadata(self, study_uid: str, base_url: str) -> AsyncIterator[bytes]:
         series = await self._client.find_series(
             SeriesQuery(study_instance_uid=study_uid),
             self._pacs,
             timeout=self._cfind_timeout,
         )
         series_uids = [s.series_instance_uid for s in series]
-        datasets = [ds async for ds in self._engine.stream_study(study_uid, series_uids)]
-        return await asyncio.to_thread(convert_datasets_to_dicom_json, datasets, base_url)
+        return self._metadata_stream(
+            lambda: self._engine.iter_study(study_uid, series_uids), base_url
+        )
 
     async def series_metadata(
         self, study_uid: str, series_uid: str, base_url: str
-    ) -> list[dict[str, Any]]:
-        cached = await self._engine.ensure_series(study_uid, series_uid)
-        return await asyncio.to_thread(
-            convert_datasets_to_dicom_json, list(cached.instances.values()), base_url
+    ) -> AsyncIterator[bytes]:
+        return self._metadata_stream(
+            lambda: self._engine.iter_series(study_uid, series_uid), base_url
         )
+
+    def _metadata_stream(self, make_iter: Any, base_url: str) -> AsyncIterator[bytes]:
+        def chunks() -> Iterator[bytes]:
+            # Conversion overlaps C-STORE arrival in this producer thread
+            # instead of collect-then-convert.
+            first = True
+            for ds in make_iter():
+                payload = json.dumps(
+                    dataset_to_dicom_json(ds, base_url),
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode()
+                yield (b"[" if first else b",") + payload
+                first = False
+            yield b"]" if not first else b"[]"
+
+        async def stream() -> AsyncIterator[bytes]:
+            async for chunk in iter_to_aiter(chunks):
+                yield chunk
+
+        return stream()
 
     async def _instance_dataset(self, study_uid, series_uid, instance_uid):  # type: ignore[no-untyped-def]
         mem = self._cache.get_series_from_memory(study_uid, series_uid)

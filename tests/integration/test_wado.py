@@ -65,3 +65,16 @@ async def test_cross_face_memory_hit(app_client, seeded_study) -> None:
     await client.get(f"/dicom-web/studies/{study}/series/{series}/metadata")
     cache = ctx["app"].state.cache
     assert cache.get_series_from_memory(study, series) is not None
+
+
+@pytest.mark.asyncio
+async def test_study_metadata_streams_chunked(app_client, seeded_study) -> None:
+    client, _ = app_client
+    study = seeded_study["study"][0]
+    resp = await client.get(f"/dicom-web/studies/{study}/metadata")
+    assert resp.status_code == 200
+    assert "content-length" not in resp.headers  # chunked StreamingResponse
+    meta = resp.json()
+    expected = {sop for s in seeded_study["series"] for sop in seeded_study[s]}
+    assert {m["00080018"]["Value"][0] for m in meta} == expected
+    assert all("BulkDataURI" in m["7FE00010"] for m in meta)
