@@ -7,7 +7,7 @@ import re
 from fastapi import HTTPException
 from pydicom import Dataset
 from pydicom.datadict import dictionary_VR, tag_for_keyword
-from pydicom.tag import Tag
+from pydicom.tag import BaseTag, Tag
 
 _CHARSET = "ISO_IR 192"
 _RESERVED = {"limit", "offset", "fuzzymatching", "includefield"}
@@ -64,7 +64,7 @@ _DEFAULT_KEYS = {
 }
 
 
-def _resolve_tag(name: str) -> Tag:
+def _resolve_tag(name: str) -> BaseTag:
     if _HEX_TAG.match(name):
         return Tag(int(name, 16))
     tag = tag_for_keyword(name)
@@ -73,7 +73,7 @@ def _resolve_tag(name: str) -> Tag:
     return Tag(tag)
 
 
-def _set_element(ds: Dataset, tag: Tag, value: str) -> None:
+def _set_element(ds: Dataset, tag: BaseTag, value: str) -> None:
     try:
         vr = dictionary_VR(tag)
     except KeyError:

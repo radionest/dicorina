@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     app.state.client = client
     app.state.loop = asyncio.get_running_loop()
     app.state.service = ProxyService(
-        client, engine, cache, pacs, qido_cache, cfind_timeout=cfg.timeouts.cfind
+        client, engine, cache, pacs, qido_cache, query, cfind_timeout=cfg.timeouts.cfind
     )
 
     from dicorina.healthcheck import Healthcheck
