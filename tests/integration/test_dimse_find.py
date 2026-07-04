@@ -156,3 +156,30 @@ async def test_cfind_forwards_pacs_failure_status(app_client, fake_pacs) -> None
         return codes
 
     assert 0xA900 in await asyncio.to_thread(_run_scu)
+
+
+@pytest.mark.asyncio
+async def test_cfind_mid_stream_failure_forwards_status(app_client, fake_pacs) -> None:
+    _, ctx = app_client
+    fake_pacs.fail_find_with = 0xA900
+    fake_pacs.fail_find_after = 1
+
+    def _run_scu() -> list[int]:
+        ae = AE(ae_title="WORKSTATION")
+        ae.add_requested_context(StudyRootQueryRetrieveInformationModelFind)
+        assoc = ae.associate("127.0.0.1", _dimse_port(ctx), ae_title=ctx["face_aet"])
+        assert assoc.is_established
+        query = Dataset()
+        query.QueryRetrieveLevel = "STUDY"
+        query.StudyInstanceUID = ""
+        codes = [
+            int(s.Status)
+            for s, _ in assoc.send_c_find(query, StudyRootQueryRetrieveInformationModelFind)
+            if s
+        ]
+        assoc.release()
+        return codes
+
+    codes = await asyncio.to_thread(_run_scu)
+    assert 0xFF00 in codes  # at least one result delivered before the failure
+    assert codes[-1] == 0xA900  # transparent PACS status forward mid-stream

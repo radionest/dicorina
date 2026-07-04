@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
@@ -51,38 +52,31 @@ def _seed_extra_studies(fake_pacs, n: int) -> None:
         )
 
 
-@pytest.mark.timeout(60)
-@pytest.mark.asyncio
-async def test_qido_streams_chunks_before_completion(fake_pacs, free_port, tmp_path) -> None:
-    # Real uvicorn server on a socket: httpx.ASGITransport buffers the whole
-    # ASGI response before returning it, so progressive delivery can only be
-    # observed over an actual TCP connection.
-    _seed_extra_studies(fake_pacs, 2)
-    fake_pacs.find_response_delay = 0.4
-
+def _live_cfg(fake_pacs, free_port, tmp_path, qido_ttl: float) -> DicorinaConfig:
     pool_aet = "STREAMPOOL"
     scp_port = free_port()
-    http_port = free_port()
     fake_pacs.register_destination(pool_aet, "127.0.0.1", scp_port)
-    cfg = DicorinaConfig.model_validate(
+    return DicorinaConfig.model_validate(
         {
             "pacs": {"host": "127.0.0.1", "port": fake_pacs.port, "aet": fake_pacs.aet},
             "pool": {"members": [{"aet": pool_aet, "port": scp_port}], "per_aet_cap": 1},
             "scp": {"bind_ip": "127.0.0.1"},
-            "dimse": {
-                "listen_ip": "127.0.0.1",
-                "listen_port": free_port(),
-                "aet": "STREAMFACE",
-            },
-            "http": {"bind_host": "127.0.0.1", "bind_port": http_port},
-            "cache": {"dir": str(tmp_path / "cache"), "qido_ttl_seconds": 0.0},
+            "dimse": {"listen_ip": "127.0.0.1", "listen_port": free_port(), "aet": "STREAMFACE"},
+            "http": {"bind_host": "127.0.0.1", "bind_port": free_port()},
+            "cache": {"dir": str(tmp_path / "cache"), "qido_ttl_seconds": qido_ttl},
             "timeouts": {"cmove": 60.0, "arrival": 30.0, "completion_grace": 2.0},
             "healthcheck": {"interval_seconds": 9999.0},
         }
     )
+
+
+@asynccontextmanager
+async def _live_server(cfg: DicorinaConfig):
     app = create_app(cfg)
     server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=http_port, log_level="warning", lifespan="on")
+        uvicorn.Config(
+            app, host="127.0.0.1", port=cfg.http.bind_port, log_level="warning", lifespan="on"
+        )
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -91,10 +85,24 @@ async def test_qido_streams_chunks_before_completion(fake_pacs, free_port, tmp_p
         while not server.started and time.monotonic() < deadline:  # noqa: ASYNC110
             await asyncio.sleep(0.05)
         assert server.started, "uvicorn server did not start in time"
+        yield f"http://127.0.0.1:{cfg.http.bind_port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
 
+
+@pytest.mark.timeout(60)
+@pytest.mark.asyncio
+async def test_qido_streams_chunks_before_completion(fake_pacs, free_port, tmp_path) -> None:
+    # Real uvicorn server on a socket: httpx.ASGITransport buffers the whole
+    # ASGI response before returning it, so progressive delivery can only be
+    # observed over an actual TCP connection.
+    _seed_extra_studies(fake_pacs, 2)
+    fake_pacs.find_response_delay = 0.4
+    async with _live_server(_live_cfg(fake_pacs, free_port, tmp_path, qido_ttl=0.0)) as base:
         stamps: list[float] = []
         async with (
-            httpx.AsyncClient(base_url=f"http://127.0.0.1:{http_port}") as client,
+            httpx.AsyncClient(base_url=base) as client,
             client.stream("GET", "/dicom-web/studies") as resp,
         ):
             assert resp.status_code == 200
@@ -103,9 +111,37 @@ async def test_qido_streams_chunks_before_completion(fake_pacs, free_port, tmp_p
                 stamps.append(time.monotonic())
         assert len(stamps) >= 3
         assert stamps[-1] - stamps[0] >= 0.6  # first chunk long before the last
-    finally:
-        server.should_exit = True
-        thread.join(timeout=10)
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.asyncio
+async def test_qido_mid_stream_failure_truncates_and_poisons_nothing(
+    fake_pacs, free_port, tmp_path
+) -> None:
+    # streaming.py: after the first chunk the 200 is committed; an upstream
+    # failure mid-stream must cut the connection, leave the JSON array
+    # unterminated, and cache nothing.
+    _seed_extra_studies(fake_pacs, 2)  # 3 studies total
+    fake_pacs.find_response_delay = 0.2
+    fake_pacs.fail_find_with = 0xA700
+    fake_pacs.fail_find_after = 2
+    async with _live_server(_live_cfg(fake_pacs, free_port, tmp_path, qido_ttl=5.0)) as base:
+        chunks: list[bytes] = []
+        async with httpx.AsyncClient(base_url=base) as client:
+            with pytest.raises((httpx.RemoteProtocolError, httpx.ReadError)):
+                async with client.stream("GET", "/dicom-web/studies") as resp:
+                    assert resp.status_code == 200
+                    async for chunk in resp.aiter_bytes():
+                        chunks.append(chunk)
+            body = b"".join(chunks)
+            assert body.startswith(b"[")
+            assert not body.endswith(b"]")  # truncated mid-array — the client's signal
+            upstream_calls = len(fake_pacs.find_identifiers)
+            fake_pacs.fail_find_with = None
+            ok = await client.get("/dicom-web/studies")
+        assert ok.status_code == 200
+        assert len(ok.json()) == 3
+        assert len(fake_pacs.find_identifiers) == upstream_calls + 1  # miss: partial not cached
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,7 @@ class FakePacs:
         self.find_calling_aets: list[str] = []
         self.find_response_delay: float = 0.0
         self.fail_find_with: int | None = None
+        self.fail_find_after: int = 0  # pending results to yield before failing
         self.active_associations = 0
         self._assoc_lock = threading.Lock()
 
@@ -104,12 +105,13 @@ class FakePacs:
             calling = calling.decode()
         self.find_identifiers.append(identifier)
         self.find_calling_aets.append(str(calling).strip())
-        if self.fail_find_with is not None:
+        if self.fail_find_with is not None and self.fail_find_after == 0:
             yield (self.fail_find_with, None)
             return
         matches = self._match(identifier)
 
         seen: set[str] = set()
+        emitted = 0
         for ds in matches:
             if level == "STUDY":
                 key = str(ds.StudyInstanceUID)
@@ -159,6 +161,10 @@ class FakePacs:
             if self.find_response_delay:
                 time.sleep(self.find_response_delay)
             yield (0xFF00, resp)
+            emitted += 1
+            if self.fail_find_with is not None and emitted >= self.fail_find_after:
+                yield (self.fail_find_with, None)
+                return
         yield (0x0000, None)
 
     def _on_move(
