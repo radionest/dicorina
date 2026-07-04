@@ -227,3 +227,33 @@ async def test_qido_disconnect_releases_upstream(app_client, fake_pacs) -> None:
     while time.monotonic() < deadline and fake_pacs.active_associations > 0:  # noqa: ASYNC110
         await asyncio.sleep(0.05)
     assert fake_pacs.active_associations == 0
+
+
+@pytest.mark.asyncio
+async def test_qido_find_uses_pool_identity(app_client, fake_pacs) -> None:
+    client, ctx = app_client
+    await client.get("/dicom-web/studies")
+    assert fake_pacs.find_calling_aets[-1] == ctx["pool_aet"]
+
+
+@pytest.mark.parametrize(
+    "app_client",
+    [{"pool": {"per_aet_find_cap": 1}, "timeouts": {"find_lease": 0.3}}],
+    indirect=True,
+)
+@pytest.mark.timeout(30)
+@pytest.mark.asyncio
+async def test_qido_find_cap_exhaustion_returns_503(app_client, fake_pacs) -> None:
+    client, _ = app_client
+    _seed_extra_studies(fake_pacs, 3)  # 4 studies x 0.3s delay ≈ 1.2s busy window
+    fake_pacs.find_response_delay = 0.3
+    slow = asyncio.create_task(client.get("/dicom-web/studies"))
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not fake_pacs.find_calling_aets:  # noqa: ASYNC110
+        await asyncio.sleep(0.02)
+    assert fake_pacs.find_calling_aets, "first find never reached the PACS"
+    resp = await client.get("/dicom-web/studies?PatientID=X")
+    assert resp.status_code == 503  # PoolExhaustedError after find_lease=0.3s
+    assert resp.headers.get("retry-after") == "1"
+    first = await slow
+    assert first.status_code == 200

@@ -183,3 +183,23 @@ async def test_cfind_mid_stream_failure_forwards_status(app_client, fake_pacs) -
     codes = await asyncio.to_thread(_run_scu)
     assert 0xFF00 in codes  # at least one result delivered before the failure
     assert codes[-1] == 0xA900  # transparent PACS status forward mid-stream
+
+
+@pytest.mark.asyncio
+async def test_cfind_upstream_identity_is_pool_aet(app_client, fake_pacs) -> None:
+    _, ctx = app_client
+
+    def _run_scu() -> None:
+        ae = AE(ae_title="WORKSTATION")
+        ae.add_requested_context(StudyRootQueryRetrieveInformationModelFind)
+        assoc = ae.associate("127.0.0.1", _dimse_port(ctx), ae_title=ctx["face_aet"])
+        assert assoc.is_established
+        query = Dataset()
+        query.QueryRetrieveLevel = "STUDY"
+        query.StudyInstanceUID = ""
+        list(assoc.send_c_find(query, StudyRootQueryRetrieveInformationModelFind))
+        assoc.release()
+
+    await asyncio.to_thread(_run_scu)
+    assert ctx["pool_aet"] != ctx["face_aet"]  # premise: the identities differ
+    assert fake_pacs.find_calling_aets[-1] == ctx["pool_aet"]
