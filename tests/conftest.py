@@ -56,28 +56,43 @@ def fake_pacs(
         pacs.stop()
 
 
+def _deep_merge(base: dict, extra: dict) -> dict:
+    out = dict(base)
+    for k, v in extra.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
 @pytest.fixture
-async def app_client(fake_pacs, free_port, tmp_path):
-    """Live ASGI app wired to the fake PACS; pool AET registered as move dest."""
+async def app_client(request, fake_pacs, free_port, tmp_path):
+    """Live ASGI app wired to the fake PACS; pool AET registered as move dest.
+
+    Override any config subtree via indirect parametrization:
+    @pytest.mark.parametrize("app_client", [{"cache": {"qido_ttl_seconds": 5.0}}],
+                             indirect=True)
+    """
     pool_aet = "DICORINATEST"
+    face_aet = "DICORINAFACE"
     scp_port = free_port()
     fake_pacs.register_destination(pool_aet, "127.0.0.1", scp_port)
-    cfg = DicorinaConfig.model_validate(
-        {
-            "pacs": {"host": "127.0.0.1", "port": fake_pacs.port, "aet": fake_pacs.aet},
-            "pool": {"members": [{"aet": pool_aet, "port": scp_port}], "per_aet_cap": 1},
-            "scp": {"bind_ip": "127.0.0.1"},
-            "dimse": {"listen_ip": "127.0.0.1", "listen_port": free_port()},
-            "http": {"bind_host": "127.0.0.1", "bind_port": free_port()},
-            "cache": {"dir": str(tmp_path / "cache"), "qido_ttl_seconds": 0.0},
-            "timeouts": {"cmove": 60.0, "arrival": 30.0, "completion_grace": 2.0},
-            "healthcheck": {"interval_seconds": 9999.0},
-        }
-    )
+    base = {
+        "pacs": {"host": "127.0.0.1", "port": fake_pacs.port, "aet": fake_pacs.aet},
+        "pool": {"members": [{"aet": pool_aet, "port": scp_port}], "per_aet_cap": 1},
+        "scp": {"bind_ip": "127.0.0.1"},
+        "dimse": {"listen_ip": "127.0.0.1", "listen_port": free_port(), "aet": face_aet},
+        "http": {"bind_host": "127.0.0.1", "bind_port": free_port()},
+        "cache": {"dir": str(tmp_path / "cache"), "qido_ttl_seconds": 0.0},
+        "timeouts": {"cmove": 60.0, "arrival": 30.0, "completion_grace": 2.0},
+        "healthcheck": {"interval_seconds": 9999.0},
+    }
+    cfg = DicorinaConfig.model_validate(_deep_merge(base, getattr(request, "param", {})))
     app = create_app(cfg)
     transport = httpx.ASGITransport(app=app)
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=transport, base_url="http://testserver") as client,
     ):
-        yield client, {"app": app, "pool_aet": pool_aet, "cfg": cfg}
+        yield client, {"app": app, "pool_aet": pool_aet, "face_aet": face_aet, "cfg": cfg}

@@ -1,8 +1,10 @@
 """DIMSE-SCP face: a pynetdicom AE wrapping the dimsechord core.
 
-C-FIND runs in a pynetdicom worker thread and reaches the async DicomClient via
-``run_coroutine_threadsafe`` against the captured uvicorn loop. C-MOVE (Task 8)
-consumes the synchronous PullEngine iterators directly.
+C-FIND is a pure sync pass-through: the pynetdicom worker thread iterates
+QueryEngine.iter_find directly (no event loop hop) and forwards raw
+identifiers 1:1. C-MOVE planning still reaches the async DicomClient via
+``run_coroutine_threadsafe``; C-MOVE data consumes the synchronous
+PullEngine iterators directly.
 """
 
 from __future__ import annotations
@@ -14,11 +16,10 @@ from typing import TYPE_CHECKING, Any
 from dimsechord import (
     ArrivalTimeoutError,
     AssociationError,
-    ImageQuery,
+    FindFailedError,
     MoveToSelfError,
     PoolExhaustedError,
     SeriesQuery,
-    StudyQuery,
 )
 from pynetdicom import AE, StoragePresentationContexts, evt
 from pynetdicom.sop_class import (  # type: ignore[attr-defined]
@@ -29,16 +30,10 @@ from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     Verification,
 )
 
-from dicorina.dimse_face.results import (
-    image_to_dataset,
-    series_to_dataset,
-    study_to_dataset,
-)
-
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
 
-    from dimsechord import DicomClient, DicomNode, PullEngine
+    from dimsechord import DicomClient, DicomNode, PullEngine, QueryEngine
     from pydicom import Dataset
 
     from dicorina.dimse_face.allowlist import DestinationAllowlist
@@ -51,20 +46,22 @@ class DimseFace:
         self,
         engine: PullEngine,
         client: DicomClient,
+        query: QueryEngine,
         pacs: DicomNode,
         allowlist: DestinationAllowlist,
         loop: asyncio.AbstractEventLoop,
-        called_aets: list[str],
+        aet: str,
         *,
         cfind_timeout: float = 30.0,
         cmove_count_timeout: float = 30.0,
     ) -> None:
         self._engine = engine
         self._client = client
+        self._query = query
         self._pacs = pacs
         self._allowlist = allowlist
         self._loop = loop
-        self._called_aets = called_aets
+        self._aet = aet
         self._cfind_timeout = cfind_timeout
         self._cmove_count_timeout = cmove_count_timeout
         self._server: Any | None = None
@@ -76,9 +73,9 @@ class DimseFace:
     def start(self, port: int, ip: str = "0.0.0.0") -> None:
         if self._server is not None:
             return
-        # The external C-FIND/C-MOVE face accepts only the primary pool AET as called-AET;
-        # multi-AET pool scaling controls C-MOVE-to-self destinations, not inbound query acceptance.
-        ae = AE(ae_title=self._called_aets[0])
+        # The external face accepts only cfg.dimse.aet as called-AET; the pool
+        # holds upstream identities and no longer names the face.
+        ae = AE(ae_title=self._aet)
         ae.require_called_aet = True
         for cx in (
             Verification,
@@ -99,7 +96,7 @@ class DimseFace:
             (evt.EVT_C_MOVE, self._on_move),  # implemented in Task 8
         ]
         self._server = ae.start_server((ip, port), block=False, evt_handlers=handlers)
-        logger.info("DIMSE face listening on %s:%s (AETs: %s)", ip, port, sorted(self._called_aets))
+        logger.info("DIMSE face listening on %s:%s (AET: %s)", ip, port, self._aet)
 
     def stop(self) -> None:
         if self._server is not None:
@@ -118,48 +115,28 @@ class DimseFace:
         return future.result(timeout=self._cfind_timeout + 5.0)
 
     def _on_find(self, event: evt.Event) -> Iterator[tuple[int, Dataset | None]]:
-        ident = event.identifier
-        level = str(getattr(ident, "QueryRetrieveLevel", "STUDY"))
-        study = str(getattr(ident, "StudyInstanceUID", "") or "")
-        series = str(getattr(ident, "SeriesInstanceUID", "") or "")
-        to_ds: Callable[[Any], Dataset]
+        model = event.context.abstract_syntax  # Patient/Study Root, as negotiated
+        gen = self._query.iter_find(event.identifier, model=model)
         try:
-            if level == "STUDY" or not study:
-                results = self._run(
-                    self._client.find_studies(
-                        StudyQuery(study_instance_uid=study or None),
-                        self._pacs,
-                        timeout=self._cfind_timeout,
-                    )
-                )
-                to_ds = study_to_dataset
-            elif level == "SERIES":
-                results = self._run(
-                    self._client.find_series(
-                        SeriesQuery(study_instance_uid=study),
-                        self._pacs,
-                        timeout=self._cfind_timeout,
-                    )
-                )
-                to_ds = series_to_dataset
-            else:  # IMAGE
-                results = self._run(
-                    self._client.find_images(
-                        ImageQuery(study_instance_uid=study, series_instance_uid=series),
-                        self._pacs,
-                        timeout=self._cfind_timeout,
-                    )
-                )
-                to_ds = image_to_dataset
+            for ds in gen:
+                if event.is_cancelled:
+                    # abort upstream, release the find lease
+                    gen.close()  # type: ignore[attr-defined]
+                    yield (0xFE00, None)
+                    return
+                yield (0xFF00, ds)  # same SCP thread, no event loop hop
+        except (PoolExhaustedError, AssociationError) as e:
+            logger.error("DIMSE C-FIND refused: %s", e)
+            yield (0xA700, None)  # Refused: Out of Resources
+            return
+        except FindFailedError as e:
+            logger.error("DIMSE C-FIND upstream failure: %s", e)
+            yield (e.status, None)  # transparent PACS status forward
+            return
         except Exception as e:
             logger.error("DIMSE C-FIND failed: %s", e)
-            yield (0xC000, None)  # Unable to process
+            yield (0xC000, None)
             return
-        for r in results:
-            if event.is_cancelled:
-                yield (0xFE00, None)  # Sub-operations terminated due to Cancel
-                return
-            yield (0xFF00, to_ds(r))
         yield (0x0000, None)
 
     def _on_move(self, event: evt.Event) -> Iterator[Any]:
