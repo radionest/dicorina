@@ -6,7 +6,7 @@ import asyncio
 import io
 import json
 import tempfile
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, cast
 
 import pydicom
 from dimsechord import (
@@ -24,7 +24,7 @@ from pynetdicom.sop_class import (  # type: ignore[attr-defined]
 from dicorina.http_face.params import build_identifier, pagination
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Iterator
+    from collections.abc import AsyncIterator, Callable, Generator, Iterator
 
     from dimsechord import DicomCache, DicomClient, DicomNode, PullEngine, QueryEngine
     from pydicom import Dataset
@@ -165,7 +165,9 @@ class ProxyService:
             lambda: self._engine.iter_series(study_uid, series_uid), base_url
         )
 
-    def _metadata_stream(self, make_iter: Any, base_url: str) -> AsyncIterator[bytes]:
+    def _metadata_stream(
+        self, make_iter: Callable[[], Iterator[Dataset]], base_url: str
+    ) -> AsyncIterator[bytes]:
         def chunks() -> Iterator[bytes]:
             # Conversion overlaps C-STORE arrival in this producer thread
             # instead of collect-then-convert.
@@ -183,7 +185,7 @@ class ProxyService:
             finally:
                 # break/close → upstream abort + C-MOVE lease release, deterministic
                 # instead of waiting on GC to collect the generator.
-                it.close()
+                cast("Generator[Dataset, None, None]", it).close()
             yield b"]" if not first else b"[]"
 
         async def stream() -> AsyncIterator[bytes]:

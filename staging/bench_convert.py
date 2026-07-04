@@ -1,9 +1,8 @@
 """Reference microbenchmark: Dataset -> DICOM JSON dict -> JSON bytes.
 
-Not part of CI. Basis for the no-multiprocessing decision in
-docs/superpowers/specs/2026-07-02-streaming-passthrough-design.md:
-~69 us per QIDO result, ~326 us per full CT header (py3.14) — conversion
-overlaps network arrival in a producer thread, so it is not the bottleneck.
+Not part of CI. Basis for the no-multiprocessing decision: ~69 us per QIDO
+result, ~326 us per full CT header (py3.14) — conversion overlaps network
+arrival in a producer thread, so JSON conversion is not the bottleneck.
 Run: uv run python staging/bench_convert.py
 """
 
