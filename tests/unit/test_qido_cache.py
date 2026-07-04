@@ -34,3 +34,9 @@ def test_key_includes_includefields() -> None:
     k1 = QidoResultCache.key("STUDY", {"a": "1"}, ["X"])
     k2 = QidoResultCache.key("STUDY", {"a": "1"}, ["Y"])
     assert k1 != k2
+
+
+def test_key_ampersand_injection_distinct() -> None:
+    injected = QidoResultCache.key("STUDY", {"PatientName": "X&StudyDate=1"})
+    honest = QidoResultCache.key("STUDY", {"PatientName": "X", "StudyDate": "1"})
+    assert injected != honest
