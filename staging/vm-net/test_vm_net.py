@@ -43,7 +43,9 @@ def test_s3_dimse_passthrough(results):
 
 
 def test_s4_cyrillic_both_faces(results):
-    assert va.check_s4(results["clienta"], results["clientb"], study_plan.CYRILLIC_NAME) == []
+    assert va.check_s4(
+        results["clienta"], results["clientb"], study_plan.CYRILLIC_NAME, SUID[0]
+    ) == []
 
 
 def test_s5_aet_pool_concurrency(results):

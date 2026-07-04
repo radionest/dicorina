@@ -59,6 +59,9 @@ def check_s1(clientb, studies, cyrillic_study):
     f = event(clientb, "qido_filtered")
     if f is None or set(f.get("studies", [])) != {cyrillic_study}:
         fails.append(f"S1: PatientName filter returned {f!r}, expected just {cyrillic_study}")
+    c = event(clientb, "qido_chunked")
+    if c is None or not c.get("chunked"):
+        fails.append(f"S1: QIDO study list not chunked ({c!r})")
     return fails
 
 
@@ -89,7 +92,7 @@ def check_s3(clienta, study, n):
     return fails
 
 
-def check_s4(clienta, clientb, cyrillic_name):
+def check_s4(clienta, clientb, cyrillic_name, cyrillic_study):
     fails = []
     cf = event(clienta, "cfind_cyrillic")
     if cf is None or cf.get("name") != cyrillic_name or not cf.get("ok"):
@@ -97,6 +100,11 @@ def check_s4(clienta, clientb, cyrillic_name):
     q = event(clientb, "qido_cyrillic")
     if q is None or q.get("name") != cyrillic_name or not q.get("ok"):
         fails.append(f"S4: HTTP QIDO cyrillic failed ({q!r})")
+    f = event(clienta, "cfind_filtered")
+    if f is None or f.get("studies") != [cyrillic_study]:
+        fails.append(
+            f"S4: DIMSE PatientName filter returned {f!r}, expected [{cyrillic_study}]"
+        )
     return fails
 
 

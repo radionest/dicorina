@@ -188,6 +188,36 @@ def cfind_cyrillic(study_uid, expect_name):
     ac.record_event(result, "cfind_cyrillic", name=got, ok=(got == expect_name))
 
 
+def cfind_filtered(expect_study):
+    """DIMSE parity of S1's QIDO filter: PatientName wildcard must narrow to one study."""
+    ae = AE(ae_title=SELF_AET)
+    ae.add_requested_context(StudyRootQueryRetrieveInformationModelFind)
+    assoc = ae.associate(PROXY_HOST, PROXY_DIMSE, ae_title=PROXY_CALLED_AET)
+    got = []
+    if assoc.is_established:
+        q = Dataset()
+        q.SpecificCharacterSet = "ISO_IR 192"
+        q.QueryRetrieveLevel = "STUDY"
+        q.StudyInstanceUID = ""
+        q.PatientName = "Иванов*"
+        for _st, ident in assoc.send_c_find(q, StudyRootQueryRetrieveInformationModelFind):
+            if ident is not None and "StudyInstanceUID" in ident:
+                got.append(str(ident.StudyInstanceUID))
+        assoc.release()
+    ac.record_event(result, "cfind_filtered", studies=got, ok=(got == [expect_study]))
+
+
+def qido_chunked_probe():
+    url = f"http://{PROXY_HOST}:{PROXY_HTTP}/dicom-web/studies"
+    chunked = False
+    try:
+        with urllib.request.urlopen(url, timeout=15) as r:
+            chunked = (r.getheader("Transfer-Encoding") == "chunked")
+    except Exception:
+        pass
+    ac.record_event(result, "qido_chunked", chunked=chunked)
+
+
 def qido_list():
     data = _get_json("/dicom-web/studies")
     studies = [d.get("0020000D", {}).get("Value", [None])[0] for d in (data or [])]
@@ -236,6 +266,7 @@ def main():
             drain("s3", STUDY[3]["StudyInstanceUID"], N)
             cmove_ghost(STUDY[3]["StudyInstanceUID"])
             cfind_cyrillic(STUDY[1]["StudyInstanceUID"], study_plan.CYRILLIC_NAME)
+            cfind_filtered(STUDY[1]["StudyInstanceUID"])
             barrier("s5", "a_s5", ["a_s5", "b_s5"])
             _current_phase["name"] = "s5"
             cmove(STUDY[4]["StudyInstanceUID"], SELF_AET)
@@ -246,6 +277,7 @@ def main():
             ac.barrier_signal(BARRIER_DIR, "a_s6_warm")
         else:  # clientb
             qido_list()
+            qido_chunked_probe()
             wado(2, "wado")
             qido_cyrillic()
             barrier("s5", "b_s5", ["a_s5", "b_s5"])
