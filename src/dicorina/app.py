@@ -12,6 +12,7 @@ from dimsechord import (
     DicomClient,
     DicomNode,
     PullEngine,
+    QueryEngine,
     StorageSCP,
 )
 from fastapi import FastAPI
@@ -28,7 +29,9 @@ async def lifespan(app: FastAPI):
     cfg: DicorinaConfig = app.state.config
 
     members = cfg.pool.members
-    pool = AssociationPool([m.aet for m in members], cfg.pool.per_aet_cap)
+    pool = AssociationPool(
+        [m.aet for m in members], cfg.pool.per_aet_cap, cfg.pool.per_aet_find_cap
+    )
     scp = StorageSCP()
     scp.start({m.aet: m.port for m in members}, cfg.scp.bind_ip)
     cache = DicomCache(
@@ -49,6 +52,9 @@ async def lifespan(app: FastAPI):
         completion_grace=cfg.timeouts.completion_grace,
     )
     client = DicomClient(calling_aet=pool.aets[0])
+
+    query = QueryEngine(pool, pacs, find_timeout=cfg.timeouts.cfind)
+    app.state.query = query
 
     from dicorina.http_face.qido_cache import QidoResultCache
     from dicorina.http_face.service import ProxyService

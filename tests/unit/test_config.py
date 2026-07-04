@@ -112,3 +112,25 @@ def test_example_config_is_valid() -> None:
     cfg = load_config(example)
     assert [m.aet for m in cfg.pool.members] == ["DICORINA"]
     assert cfg.pool.members[0].port == 11112
+
+
+def test_dimse_aet_and_find_cap_defaults(tmp_path) -> None:
+    cfg = DicorinaConfig.model_validate(
+        {"pacs": {"host": "h"}, "scp": {}, "cache": {"dir": str(tmp_path)}}
+    )
+    assert cfg.dimse.aet == "DICORINA"
+    assert cfg.pool.per_aet_find_cap == 4
+
+
+def test_dimse_aet_and_find_cap_from_toml(tmp_path) -> None:
+    cfg = DicorinaConfig.model_validate(
+        {
+            "pacs": {"host": "h"},
+            "scp": {},
+            "cache": {"dir": str(tmp_path)},
+            "dimse": {"aet": "FACE1"},
+            "pool": {"members": [{"aet": "P1", "port": 1}], "per_aet_find_cap": 2},
+        }
+    )
+    assert cfg.dimse.aet == "FACE1"
+    assert cfg.pool.per_aet_find_cap == 2

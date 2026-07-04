@@ -18,6 +18,8 @@ aet = "HOSPITALPACS"
 [pool]
 # Maximum concurrent DIMSE associations per AET.
 per_aet_cap = 1
+# Maximum concurrent C-FIND associations per AET.
+per_aet_find_cap = 4
 
 [[pool.members]]
 aet  = "DICORINA"
@@ -35,6 +37,8 @@ bind_ip = "0.0.0.0"
 
 # DIMSE send configuration
 [dimse]
+# AE Title dicorina presents when initiating DIMSE associations (e.g. C-FIND to PACS)
+aet = "DICORINA"
 # IP address for outbound DIMSE associations (typically the local IP visible to PACS)
 listen_ip = "0.0.0.0"
 # Port for outbound DIMSE associations (ephemeral; must be routable from PACS back to this host)
