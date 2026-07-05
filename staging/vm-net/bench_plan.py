@@ -2,7 +2,9 @@
 
 Cold rounds: within one round a study is cold only until its first transfer;
 both cmove_cold and wado_frame_cold populate dicorina's study cache, so they
-must not share a study inside a round. Halves swap between rounds.
+must not share a study inside a round. Halves swap between rounds. The latency
+bench rotates its two big studies with num_studies=2: one cmove study and one
+frame study per round, swapping.
 
 QIDO uniqueness is deterministic, not timing-based: distinct (PatientName, limit)
 per rep and variant, so no counted rep can hit the 5 s QIDO result cache.

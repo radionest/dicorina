@@ -19,3 +19,11 @@ def test_qido_query_deterministic_unique_and_url_safe():
     assert bench_plan.qido_query(0, warm=True) == "PatientName=Patient%5E2&limit=201"
     assert bench_plan.qido_query(5) == "PatientName=Patient%5E2&limit=106"
     assert "^" not in "".join(qs)  # raw '^' is invalid in a URL query
+
+
+def test_cold_round_split_two_big_studies():
+    r0 = bench_plan.cold_round_split(0, 2)
+    r1 = bench_plan.cold_round_split(1, 2)
+    assert r0 == {"cmove_cold": [0], "wado_frame_cold": [1]}
+    assert r1 == {"cmove_cold": [1], "wado_frame_cold": [0]}
+    assert bench_plan.cold_round_split(2, 2) == r0
