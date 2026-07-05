@@ -20,12 +20,22 @@ def test_s0_pass_and_fail():
 def test_s1_list_and_filter():
     cb = _client("clientb", events=[
         {"kind": "qido_list", "studies": [S1, S2, S3, S4, S5, S6], "ok": True},
-        {"kind": "qido_filtered", "studies": [S1], "ok": True}])
+        {"kind": "qido_filtered", "studies": [S1], "ok": True},
+        {"kind": "qido_chunked", "chunked": True}])
     assert va.check_s1(cb, [S1, S2, S3, S4, S5, S6], S1) == []
     cb_bad = _client("clientb", events=[
         {"kind": "qido_list", "studies": [S1, S2], "ok": True},
-        {"kind": "qido_filtered", "studies": [S1], "ok": True}])
+        {"kind": "qido_filtered", "studies": [S1], "ok": True},
+        {"kind": "qido_chunked", "chunked": True}])
     assert va.check_s1(cb_bad, [S1, S2, S3, S4, S5, S6], S1)
+
+
+def test_s1_not_chunked_fails():
+    cb = _client("clientb", events=[
+        {"kind": "qido_list", "studies": [S1, S2, S3, S4, S5, S6], "ok": True},
+        {"kind": "qido_filtered", "studies": [S1], "ok": True},
+        {"kind": "qido_chunked", "chunked": False}])
+    assert va.check_s1(cb, [S1, S2, S3, S4, S5, S6], S1)
 
 
 def test_s2_wado_metadata_and_frame():
@@ -47,12 +57,15 @@ def test_s3_passthrough_and_ghost():
 
 
 def test_s4_cyrillic_both_faces():
-    ca = _client("clienta", events=[{"kind": "cfind_cyrillic", "name": "Иванов^Пётр", "ok": True}])
+    ca = _client("clienta", events=[
+        {"kind": "cfind_cyrillic", "name": "Иванов^Пётр", "ok": True},
+        {"kind": "cfind_filtered", "studies": [S1], "ok": True}])
     cb = _client("clientb", events=[{"kind": "qido_cyrillic", "name": "Иванов^Пётр", "ok": True}])
-    assert va.check_s4(ca, cb, "Иванов^Пётр") == []
-    cb_bad = _client("clientb", events=[
-        {"kind": "qido_cyrillic", "name": "Ivanov^Petr", "ok": True}])
-    assert va.check_s4(ca, cb_bad, "Иванов^Пётр")
+    assert va.check_s4(ca, cb, "Иванов^Пётр", S1) == []
+    ca_bad = _client("clienta", events=[
+        {"kind": "cfind_cyrillic", "name": "Иванов^Пётр", "ok": True},
+        {"kind": "cfind_filtered", "studies": [S1, S2], "ok": False}])
+    assert va.check_s4(ca_bad, cb, "Иванов^Пётр", S1)
 
 
 def test_s5_concurrent_isolation():

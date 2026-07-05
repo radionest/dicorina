@@ -144,7 +144,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cachetools", specifier = ">=7.0.0" },
-    { name = "dimsechord", specifier = ">=0.4.0" },
+    { name = "dimsechord", specifier = ">=0.5.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pydicom", specifier = ">=2.3.1" },
@@ -165,16 +165,16 @@ dev = [
 
 [[package]]
 name = "dimsechord"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachetools" },
     { name = "pydicom" },
     { name = "pynetdicom" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/72/44/bc7cb9bb31c21b55e6f941ee278959a6cd31d28d7724b58fd8c215f82870/dimsechord-0.4.0.tar.gz", hash = "sha256:d1fdaeed5a5a08a14a0a61922faa35d85c8eadb574c9bfbfcd79b38344e24c9a", size = 70177, upload-time = "2026-06-29T11:38:22.444Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/aa/92/be5277b44f28d2241385e7c1fd28d76092f514957c3ca807d5d6e5ffaf71/dimsechord-0.5.0.tar.gz", hash = "sha256:b9dd68840dfef020570989b657e8440a9f3dbf59f47cde2d82574298c4a83e7d", size = 90928, upload-time = "2026-07-03T08:40:59.785Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/6d/ccfa209f618094f487d3f77dbb2683b61360dd0c9f377a56f2e5cb91563e/dimsechord-0.4.0-py3-none-any.whl", hash = "sha256:0692f4b7976f0d9c079136fd12621e4b2dc1aa260b68bb879422aa3b9e139859", size = 33710, upload-time = "2026-06-29T11:38:21.302Z" },
+    { url = "https://files.pythonhosted.org/packages/85/12/79fc414c2cee1a893085ed7a52a6681a7e5e069ad651039ab47a8020c7aa/dimsechord-0.5.0-py3-none-any.whl", hash = "sha256:34fb2cd3a1d08c25c7477cbfac9c29563f451348eba496cecfeb98bf15d9cd9b", size = 41009, upload-time = "2026-07-03T08:40:58.586Z" },
 ]
 
 [[package]]

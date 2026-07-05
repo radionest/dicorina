@@ -28,6 +28,7 @@ class PoolConfig(BaseModel):
         min_length=1,
     )
     per_aet_cap: int = 1
+    per_aet_find_cap: int = 4
 
     @model_validator(mode="after")
     def _unique_aets_and_ports(self) -> PoolConfig:
@@ -47,6 +48,7 @@ class ScpConfig(BaseModel):
 
 
 class DimseConfig(BaseModel):
+    aet: str = "DICORINA"
     listen_ip: str = "0.0.0.0"
     listen_port: int = 4242
     allowlist: dict[str, str] = Field(default_factory=dict)
@@ -73,6 +75,7 @@ class TimeoutsConfig(BaseModel):
     cmove: float = 300.0
     arrival: float = 60.0
     completion_grace: float = 5.0
+    find_lease: float = 30.0
 
 
 class HealthcheckConfig(BaseModel):

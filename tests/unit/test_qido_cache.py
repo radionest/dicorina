@@ -11,20 +11,32 @@ def test_key_is_order_independent() -> None:
 def test_put_get_roundtrip() -> None:
     c = QidoResultCache(ttl_seconds=5.0)
     k = c.key("STUDY", {"PatientID": "P1"})
-    c.put(k, [{"x": 1}])
-    assert c.get(k) == [{"x": 1}]
+    c.put(k, b'[{"x":1}]')
+    assert c.get(k) == b'[{"x":1}]'
 
 
 def test_disabled_when_ttl_zero() -> None:
     c = QidoResultCache(ttl_seconds=0.0)
     k = c.key("STUDY", {})
-    c.put(k, [{"x": 1}])
+    c.put(k, b'[{"x":1}]')
     assert c.get(k) is None
 
 
 def test_expires_after_ttl() -> None:
     c = QidoResultCache(ttl_seconds=0.05)
     k = c.key("STUDY", {})
-    c.put(k, [{"x": 1}])
+    c.put(k, b'[{"x":1}]')
     time.sleep(0.1)
     assert c.get(k) is None
+
+
+def test_key_includes_includefields() -> None:
+    k1 = QidoResultCache.key("STUDY", {"a": "1"}, ["X"])
+    k2 = QidoResultCache.key("STUDY", {"a": "1"}, ["Y"])
+    assert k1 != k2
+
+
+def test_key_ampersand_injection_distinct() -> None:
+    injected = QidoResultCache.key("STUDY", {"PatientName": "X&StudyDate=1"})
+    honest = QidoResultCache.key("STUDY", {"PatientName": "X", "StudyDate": "1"})
+    assert injected != honest

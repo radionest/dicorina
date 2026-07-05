@@ -18,6 +18,8 @@ aet = "HOSPITALPACS"
 [pool]
 # Maximum concurrent DIMSE associations per AET.
 per_aet_cap = 1
+# Maximum concurrent C-FIND associations per AET.
+per_aet_find_cap = 4
 
 [[pool.members]]
 aet  = "DICORINA"
@@ -33,11 +35,17 @@ port = 11112
 [scp]
 bind_ip = "0.0.0.0"
 
-# DIMSE send configuration
+# DIMSE face (inbound SCP) configuration
 [dimse]
-# IP address for outbound DIMSE associations (typically the local IP visible to PACS)
+# AE Title of dicorina's inbound DIMSE face. External SCUs (e.g. clarinet) must
+# address this exact AET as the called AET — other called AETs are rejected.
+# Also used as the calling AET of the C-STORE sub-associations that deliver
+# C-MOVE results to the destination. Upstream identities toward the PACS come
+# from [[pool.members]], not from this key.
+aet = "DICORINA"
+# Interface the DIMSE face listens on (0.0.0.0 = all interfaces)
 listen_ip = "0.0.0.0"
-# Port for outbound DIMSE associations (ephemeral; must be routable from PACS back to this host)
+# Port the DIMSE face listens on; external SCUs connect here
 listen_port = 4242
 # Optional: AE Title to IP:port allowlist for security
 # Uncomment to restrict which remote AEs can connect
@@ -82,6 +90,8 @@ cmove = 300.0
 arrival = 60.0
 # Grace period after completion signal in seconds
 completion_grace = 5.0
+# Max wait for a free per-AET C-FIND slot before failing (HTTP 503 / DIMSE 0xA700)
+find_lease = 30.0
 
 # Health check configuration
 [healthcheck]

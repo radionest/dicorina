@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,6 +28,13 @@ class FakePacs:
         self._instances: list[Dataset] = []
         self._destinations: dict[str, tuple[str, int]] = {}
         self._server: object | None = None
+        self.find_identifiers: list[Dataset] = []
+        self.find_calling_aets: list[str] = []
+        self.find_response_delay: float = 0.0
+        self.fail_find_with: int | None = None
+        self.fail_find_after: int = 0  # pending results to yield before failing
+        self.active_associations = 0
+        self._assoc_lock = threading.Lock()
 
     # ── seeding ──────────────────────────────────────────────────
     def add_instance(self, ds: Dataset) -> None:
@@ -52,6 +61,9 @@ class FakePacs:
             (evt.EVT_C_FIND, self._on_find),
             (evt.EVT_C_MOVE, self._on_move),
             (evt.EVT_C_ECHO, self._on_echo),
+            (evt.EVT_ESTABLISHED, self._on_established),
+            (evt.EVT_RELEASED, self._on_closed),
+            (evt.EVT_ABORTED, self._on_closed),
         ]
         self._server = ae.start_server(("127.0.0.1", port), block=False, evt_handlers=handlers)
 
@@ -64,6 +76,14 @@ class FakePacs:
     @staticmethod
     def _on_echo(event: evt.Event) -> int:  # noqa: ARG004
         return 0x0000
+
+    def _on_established(self, event: evt.Event) -> None:  # noqa: ARG002
+        with self._assoc_lock:
+            self.active_associations += 1
+
+    def _on_closed(self, event: evt.Event) -> None:  # noqa: ARG002
+        with self._assoc_lock:
+            self.active_associations -= 1
 
     def _match(self, identifier: Dataset) -> list[Dataset]:
         study = str(getattr(identifier, "StudyInstanceUID", "") or "")
@@ -80,9 +100,18 @@ class FakePacs:
     def _on_find(self, event: evt.Event) -> Iterator[tuple[int, Dataset | None]]:
         identifier = event.identifier
         level = str(getattr(identifier, "QueryRetrieveLevel", "STUDY"))
+        calling = event.assoc.requestor.ae_title
+        if hasattr(calling, "decode"):
+            calling = calling.decode()
+        self.find_identifiers.append(identifier)
+        self.find_calling_aets.append(str(calling).strip())
+        if self.fail_find_with is not None and self.fail_find_after == 0:
+            yield (self.fail_find_with, None)
+            return
         matches = self._match(identifier)
 
         seen: set[str] = set()
+        emitted = 0
         for ds in matches:
             if level == "STUDY":
                 key = str(ds.StudyInstanceUID)
@@ -129,7 +158,13 @@ class FakePacs:
                 resp.SOPInstanceUID = ds.SOPInstanceUID
                 resp.SOPClassUID = ds.SOPClassUID
                 resp.InstanceNumber = ds.InstanceNumber
+            if self.find_response_delay:
+                time.sleep(self.find_response_delay)
             yield (0xFF00, resp)
+            emitted += 1
+            if self.fail_find_with is not None and emitted >= self.fail_find_after:
+                yield (self.fail_find_with, None)
+                return
         yield (0x0000, None)
 
     def _on_move(

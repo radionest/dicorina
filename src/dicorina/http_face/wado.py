@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from dicorina.deps import ServiceDep  # noqa: TC001
+from dicorina.http_face.streaming import dicom_json_stream_response
 
 router = APIRouter()
-DICOM_JSON = "application/dicom+json"
 
 
 def _base_url(request: Request) -> str:
@@ -20,17 +20,17 @@ def _parse_frames(frames: str) -> list[int]:
 
 
 @router.get("/studies/{study_uid}/metadata")
-async def study_metadata(study_uid: str, request: Request, service: ServiceDep) -> JSONResponse:
-    meta = await service.study_metadata(study_uid, _base_url(request))
-    return JSONResponse(content=meta, media_type=DICOM_JSON)
+async def study_metadata(study_uid: str, request: Request, service: ServiceDep) -> Response:
+    result = await service.study_metadata(study_uid, _base_url(request))
+    return await dicom_json_stream_response(result)
 
 
 @router.get("/studies/{study_uid}/series/{series_uid}/metadata")
 async def series_metadata(
     study_uid: str, series_uid: str, request: Request, service: ServiceDep
-) -> JSONResponse:
-    meta = await service.series_metadata(study_uid, series_uid, _base_url(request))
-    return JSONResponse(content=meta, media_type=DICOM_JSON)
+) -> Response:
+    result = await service.series_metadata(study_uid, series_uid, _base_url(request))
+    return await dicom_json_stream_response(result)
 
 
 @router.get("/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}/frames/{frames}")

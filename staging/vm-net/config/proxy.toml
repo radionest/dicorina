@@ -5,6 +5,7 @@ aet = "HOSPITALPACS"
 
 [pool]
 per_aet_cap = 1
+per_aet_find_cap = 4
 
 [[pool.members]]
 aet = "DICORINA1"
@@ -18,6 +19,7 @@ port = 11113
 bind_ip = "0.0.0.0"
 
 [dimse]
+aet = "DICORINA1"
 listen_ip = "0.0.0.0"
 listen_port = 4242
 [dimse.allowlist]

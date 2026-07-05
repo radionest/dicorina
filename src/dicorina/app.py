@@ -12,6 +12,7 @@ from dimsechord import (
     DicomClient,
     DicomNode,
     PullEngine,
+    QueryEngine,
     StorageSCP,
 )
 from fastapi import FastAPI
@@ -28,7 +29,9 @@ async def lifespan(app: FastAPI):
     cfg: DicorinaConfig = app.state.config
 
     members = cfg.pool.members
-    pool = AssociationPool([m.aet for m in members], cfg.pool.per_aet_cap)
+    pool = AssociationPool(
+        [m.aet for m in members], cfg.pool.per_aet_cap, cfg.pool.per_aet_find_cap
+    )
     scp = StorageSCP()
     scp.start({m.aet: m.port for m in members}, cfg.scp.bind_ip)
     cache = DicomCache(
@@ -50,6 +53,11 @@ async def lifespan(app: FastAPI):
     )
     client = DicomClient(calling_aet=pool.aets[0])
 
+    query = QueryEngine(
+        pool, pacs, find_timeout=cfg.timeouts.cfind, lease_timeout=cfg.timeouts.find_lease
+    )
+    app.state.query = query
+
     from dicorina.http_face.qido_cache import QidoResultCache
     from dicorina.http_face.service import ProxyService
 
@@ -63,7 +71,7 @@ async def lifespan(app: FastAPI):
     app.state.client = client
     app.state.loop = asyncio.get_running_loop()
     app.state.service = ProxyService(
-        client, engine, cache, pacs, qido_cache, cfind_timeout=cfg.timeouts.cfind
+        client, engine, cache, pacs, qido_cache, query, cfind_timeout=cfg.timeouts.cfind
     )
 
     from dicorina.healthcheck import Healthcheck
@@ -79,10 +87,11 @@ async def lifespan(app: FastAPI):
     dimse = DimseFace(
         engine=engine,
         client=client,
+        query=query,
         pacs=pacs,
         allowlist=DestinationAllowlist(cfg.dimse.allowlist),
         loop=app.state.loop,
-        called_aets=pool.aets,
+        aet=cfg.dimse.aet,
         cfind_timeout=cfg.timeouts.cfind,
     )
     dimse.start(cfg.dimse.listen_port, cfg.dimse.listen_ip)
