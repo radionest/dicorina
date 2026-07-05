@@ -59,10 +59,18 @@ Cold scenarios wipe the proxy cache between rounds (9p req/ack protocol); warm s
 re-read what the cold pass cached. Report: `staging/.data/vm-net/bench-report.md`
 (+ raw samples in `bench-clienta.json`).
 
+Bench data is generated and imported into the bench PACS at bench start, never baked
+into the golden: two `BENCH_BIG_INSTANCES`-instance studies (`Bench^Big1/2`) drive the
+move/WADO scenarios, and one patient (`Bench^Multi`) with `BENCH_FIND_STUDIES` small
+studies drives `cfind_study`, which expects exactly that many matches — 2030 instances
+(~8 MB) at the defaults. The qido scenarios keep hitting the e2e patients baked into
+the golden.
+
     FORCE_REBUILD=pacs bash staging/vm-net/build-golden.sh   # once: bakes libOrthancDicomWeb.so
     bash staging/vm-net/bench.sh
 
-Knobs: `BENCH_REPS` (20), `BENCH_MOVE_REPS` (10), `BENCH_COLD_ROUNDS` (2), plus the usual
-`WORK`, `TIMEOUT`, `INSTANCES_PER_STUDY`. e2e stays untouched: `pacs.json` loads no
-plugins and keeps S0 isolation; only `pacs-bench.json` enables DICOMweb and direct
-client access.
+Knobs: `BENCH_REPS` (20), `BENCH_MOVE_REPS` (10), `BENCH_COLD_ROUNDS` (2),
+`BENCH_BIG_INSTANCES` (1000), `BENCH_FIND_STUDIES` (15), `BENCH_FIND_INSTANCES` (2),
+plus the usual `WORK`, `TIMEOUT`, `INSTANCES_PER_STUDY`. Debug runs: `BENCH_BIG_INSTANCES=50`
+keeps the moves fast. e2e stays untouched: `pacs.json` loads no plugins and keeps S0
+isolation; only `pacs-bench.json` enables DICOMweb and direct client access.
