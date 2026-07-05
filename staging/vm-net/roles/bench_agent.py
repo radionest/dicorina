@@ -3,6 +3,7 @@ through dicorina, from the same VM (one clock — no cross-VM sync). Interleaves
 direct/proxy reps so host-load drift hits both paths equally. Writes raw samples;
 the host computes stats. Python 3.7 (client golden VM)."""
 
+import contextlib
 import json
 import os
 import sys
@@ -337,9 +338,10 @@ def main():
     meta = {"reps": REPS, "move_reps": MOVE_REPS, "cold_rounds": COLD_ROUNDS,
             "instances_per_study": N, "studies": NUM_STUDIES,
             "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    server = start_scp()
+    server = None
     rc = 0
     try:
+        server = start_scp()
         proxy_up = wait_http(PROXY["http"] + "/health", 1800)
         pacs_up = wait_http(DIRECT["http"] + "/dicom-web/studies?limit=1", 300)
         if not (proxy_up and pacs_up):
@@ -360,16 +362,21 @@ def main():
         bench_qido_warm()
         return rc
     finally:
-        # shutdown SCP first: stops _on_store mutations so `samples` is stable for json.dump
-        server.shutdown()
-        meta["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-        tmp = RESULT_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"role": "bench", "meta": meta, "samples": samples},
-                      f, ensure_ascii=False)
-        os.replace(tmp, RESULT_PATH)
-        open(os.path.join(DATA_DIR, "bench-stop"), "w").close()
-        open(os.path.join(DATA_DIR, "bench-done"), "w").close()
+        # stop the SCP first: best-effort teardown of the store threads before
+        # finalizing results; the markers below must land regardless
+        if server is not None:
+            with contextlib.suppress(Exception):
+                server.shutdown()
+        try:
+            meta["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            tmp = RESULT_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"role": "bench", "meta": meta, "samples": samples},
+                          f, ensure_ascii=False)
+            os.replace(tmp, RESULT_PATH)
+        finally:
+            open(os.path.join(DATA_DIR, "bench-stop"), "w").close()
+            open(os.path.join(DATA_DIR, "bench-done"), "w").close()
 
 
 if __name__ == "__main__":
