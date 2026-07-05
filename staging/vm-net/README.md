@@ -49,3 +49,20 @@ observations, not gating asserts.
 ## Resource budget
 
 pacs 3072 MB · proxy 2048 MB · clientA/B 1024 MB each ≈ 7 GB of guests; fits in a 23 GB host with headroom.
+
+## Latency bench
+
+`bench.sh` boots 3 nodes (pacs with the DICOMweb plugin + CLIENTA as a known modality,
+proxy, clienta) and measures per-scenario latency direct vs through dicorina from the
+same client VM: interleaved reps, median/p95, overhead = median(proxy) − median(direct).
+Cold scenarios wipe the proxy cache between rounds (9p req/ack protocol); warm scenarios
+re-read what the cold pass cached. Report: `staging/.data/vm-net/bench-report.md`
+(+ raw samples in `bench-clienta.json`).
+
+    FORCE_REBUILD=pacs bash staging/vm-net/build-golden.sh   # once: bakes libOrthancDicomWeb.so
+    bash staging/vm-net/bench.sh
+
+Knobs: `BENCH_REPS` (20), `BENCH_MOVE_REPS` (10), `BENCH_COLD_ROUNDS` (2), plus the usual
+`WORK`, `TIMEOUT`, `INSTANCES_PER_STUDY`. e2e stays untouched: `pacs.json` loads no
+plugins and keeps S0 isolation; only `pacs-bench.json` enables DICOMweb and direct
+client access.
