@@ -48,3 +48,6 @@ install.sh+systemd, two clients). Build goldens once, then run:
 
 Env: `WORK=<disk dir>` (default /tmp/dicorina-vm-net), `INSTANCES_PER_STUDY` (default 50),
 `TIMEOUT`. Needs /dev/kvm + uv. Pure-module units run in the normal suite (`uv run pytest`).
+
+A latency bench (dicorina overhead vs a direct client→PACS path) reuses the same
+stand — see the "Latency bench" section in `staging/vm-net/README.md`.

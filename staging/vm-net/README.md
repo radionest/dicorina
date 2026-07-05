@@ -74,3 +74,8 @@ Knobs: `BENCH_REPS` (20), `BENCH_MOVE_REPS` (10), `BENCH_COLD_ROUNDS` (2),
 plus the usual `WORK`, `TIMEOUT`, `INSTANCES_PER_STUDY`. Debug runs: `BENCH_BIG_INSTANCES=50`
 keeps the moves fast. e2e stays untouched: `pacs.json` loads no plugins and keeps S0
 isolation; only `pacs-bench.json` enables DICOMweb and direct client access.
+
+`bench.sh` never gates on the numbers; its exit code reflects only whether data was
+produced: `0` report written; `1` infrastructure failure (proxy install, bench-data
+import, or readiness/timeout — no samples); `2` bench completed but no scenario
+yielded a valid sample, or a sanity check failed.
