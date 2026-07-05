@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 from pydicom.dataset import Dataset
@@ -30,11 +31,14 @@ RESULT_PATH = os.environ["RESULT_PATH"]
 REPS = int(os.environ.get("BENCH_REPS", "20"))
 MOVE_REPS = int(os.environ.get("BENCH_MOVE_REPS", "10"))
 COLD_ROUNDS = int(os.environ.get("BENCH_COLD_ROUNDS", "2"))
-N = int(os.environ.get("INSTANCES_PER_STUDY", "50"))
-NUM_STUDIES = int(os.environ.get("STUDIES", "6"))
+BIG_INSTANCES = int(os.environ.get("BENCH_BIG_INSTANCES", "1000"))
+FIND_STUDIES = int(os.environ.get("BENCH_FIND_STUDIES", "15"))
+FIND_INSTANCES = int(os.environ.get("BENCH_FIND_INSTANCES", "2"))
 WARMUP = 3
 
-PLAN = study_plan.build_study_plan(NUM_STUDIES, N)
+BENCH = study_plan.build_bench_plan(BIG_INSTANCES, FIND_STUDIES, FIND_INSTANCES)
+BIG = BENCH["big"]  # the 2 big studies: move/WADO scenarios
+MULTI = BENCH["multi"][0]  # PatientName source for the 15-study C-FIND
 
 DIRECT = {
     "host": os.environ["PACS_HOST"], "port": int(os.environ["PACS_DICOM"]),
@@ -98,7 +102,7 @@ def timed_cecho(target):
     return (time.perf_counter() - t0) * 1000.0, ok, err
 
 
-def timed_cfind(target, query):
+def timed_cfind(target, query, expect_n=None):
     ae = AE(ae_title=SELF_AET)
     ae.add_requested_context(StudyRootQueryRetrieveInformationModelFind)
     n, err = 0, None
@@ -115,8 +119,11 @@ def timed_cfind(target, query):
         err = repr(exc)
         assoc.abort()
     t_ms = (time.perf_counter() - t0) * 1000.0
-    if err is None and n == 0:
-        err = "0 results"
+    if err is None:
+        if expect_n is not None and n != expect_n:
+            err = f"{n} results, expected {expect_n}"
+        elif expect_n is None and n == 0:
+            err = "0 results"
     return t_ms, err is None, err
 
 
@@ -164,11 +171,11 @@ def timed_http(url, timeout=120):
 
 # --- query/url builders ---
 
-def q_study_all():
+def q_patient_studies(name):
     query = Dataset()
     query.QueryRetrieveLevel = "STUDY"
     query.StudyInstanceUID = ""
-    query.PatientName = ""
+    query.PatientName = name
     return query
 
 
@@ -180,15 +187,14 @@ def q_series(study_uid):
     return query
 
 
-def meta_url(base, idx):
-    return f"{base}/dicom-web/studies/{PLAN[idx]['StudyInstanceUID']}/metadata"
+def meta_url(base, study):
+    return f"{base}/dicom-web/studies/{study['StudyInstanceUID']}/metadata"
 
 
-def frame_url(base, idx):
-    st = PLAN[idx]
-    return (f"{base}/dicom-web/studies/{st['StudyInstanceUID']}"
-            f"/series/{st['SeriesInstanceUID']}"
-            f"/instances/{st['SOPInstanceUIDs'][0]}/frames/1")
+def frame_url(base, study):
+    return (f"{base}/dicom-web/studies/{study['StudyInstanceUID']}"
+            f"/series/{study['SeriesInstanceUID']}"
+            f"/instances/{study['SOPInstanceUIDs'][0]}/frames/1")
 
 
 def qido_url(base, query_string):
@@ -211,13 +217,15 @@ def run_interleaved(scenario, fn, reps, warmup=WARMUP):
 
 def bench_cfind_study():
     def fn(path, _rep):
-        t_ms, ok, err = timed_cfind(TARGET[path], q_study_all())
+        t_ms, ok, err = timed_cfind(
+            TARGET[path], q_patient_studies(MULTI["PatientName"]), expect_n=FIND_STUDIES
+        )
         return t_ms, ok, err, None
     run_interleaved("cfind_study", fn, REPS)
 
 
 def bench_cfind_series():
-    uid = PLAN[1]["StudyInstanceUID"]
+    uid = BIG[0]["StudyInstanceUID"]
 
     def fn(path, _rep):
         t_ms, ok, err = timed_cfind(TARGET[path], q_series(uid))
@@ -242,50 +250,51 @@ def bench_cold_rounds():
         if not request_wipe(rnd + 1):
             record("wipe", "proxy", rnd, 0.0, False, "wipe ack timeout")
             continue
-        split = bench_plan.cold_round_split(rnd, NUM_STUDIES)
+        split = bench_plan.cold_round_split(rnd, 2)
         # metadata first: pass-through, does NOT populate the study cache
-        for idx in range(NUM_STUDIES):
-            uid = PLAN[idx]["StudyInstanceUID"]
-            rep = rnd * NUM_STUDIES + idx
-            t_ms, ok, err = timed_http(meta_url(PROXY["http"], idx))
-            record("wado_meta_cold", "proxy", rep, t_ms, ok, err, uid)
-            t_ms, ok, err = timed_http(meta_url(DIRECT["http"], idx))
-            record("wado_meta_cold", "direct", rep, t_ms, ok, err, uid)
+        for idx, study in enumerate(BIG):
+            rep = rnd * 2 + idx
+            t_ms, ok, err = timed_http(meta_url(PROXY["http"], study))
+            record("wado_meta_cold", "proxy", rep, t_ms, ok, err, study["StudyInstanceUID"])
+            t_ms, ok, err = timed_http(meta_url(DIRECT["http"], study))
+            record("wado_meta_cold", "direct", rep, t_ms, ok, err, study["StudyInstanceUID"])
         for idx in split["cmove_cold"]:
-            uid = PLAN[idx]["StudyInstanceUID"]
-            rep = rnd * NUM_STUDIES + idx
-            t_ms, ok, err = timed_cmove(PROXY, uid, N)
+            study = BIG[idx]
+            uid = study["StudyInstanceUID"]
+            rep = rnd * 2 + idx
+            t_ms, ok, err = timed_cmove(PROXY, uid, BIG_INSTANCES)
             record("cmove_cold", "proxy", rep, t_ms, ok, err, uid)
-            t_ms, ok, err = timed_cmove(DIRECT, uid, N)
+            t_ms, ok, err = timed_cmove(DIRECT, uid, BIG_INSTANCES)
             record("cmove_cold", "direct", rep, t_ms, ok, err, uid)
         for idx in split["wado_frame_cold"]:
-            uid = PLAN[idx]["StudyInstanceUID"]
-            rep = rnd * NUM_STUDIES + idx
-            t_ms, ok, err = timed_http(frame_url(PROXY["http"], idx))
+            study = BIG[idx]
+            uid = study["StudyInstanceUID"]
+            rep = rnd * 2 + idx
+            t_ms, ok, err = timed_http(frame_url(PROXY["http"], study))
             record("wado_frame_cold", "proxy", rep, t_ms, ok, err, uid)
-            t_ms, ok, err = timed_http(frame_url(DIRECT["http"], idx))
+            t_ms, ok, err = timed_http(frame_url(DIRECT["http"], study))
             record("wado_frame_cold", "direct", rep, t_ms, ok, err, uid)
 
 
 def bench_warm_pass():
-    # every study is cached: each cold round transferred all of them
+    # both big studies are cached: each cold round moved one and frame-fetched the other
     def mv(path, rep):
-        idx = rep % NUM_STUDIES if rep >= 0 else 0
-        uid = PLAN[idx]["StudyInstanceUID"]
-        t_ms, ok, err = timed_cmove(TARGET[path], uid, N)
+        idx = rep % 2 if rep >= 0 else 0
+        uid = BIG[idx]["StudyInstanceUID"]
+        t_ms, ok, err = timed_cmove(TARGET[path], uid, BIG_INSTANCES)
         return t_ms, ok, err, uid
     run_interleaved("cmove_warm", mv, MOVE_REPS, warmup=1)
 
     def meta(path, rep):
-        idx = rep % NUM_STUDIES if rep >= 0 else 0
-        t_ms, ok, err = timed_http(meta_url(TARGET[path]["http"], idx))
-        return t_ms, ok, err, PLAN[idx]["StudyInstanceUID"]
+        idx = rep % 2 if rep >= 0 else 0
+        t_ms, ok, err = timed_http(meta_url(TARGET[path]["http"], BIG[idx]))
+        return t_ms, ok, err, BIG[idx]["StudyInstanceUID"]
     run_interleaved("wado_meta_warm", meta, REPS)
 
     def frame(path, rep):
-        idx = rep % NUM_STUDIES if rep >= 0 else 0
-        t_ms, ok, err = timed_http(frame_url(TARGET[path]["http"], idx))
-        return t_ms, ok, err, PLAN[idx]["StudyInstanceUID"]
+        idx = rep % 2 if rep >= 0 else 0
+        t_ms, ok, err = timed_http(frame_url(TARGET[path]["http"], BIG[idx]))
+        return t_ms, ok, err, BIG[idx]["StudyInstanceUID"]
     run_interleaved("wado_frame_warm", frame, REPS)
 
 
@@ -323,6 +332,30 @@ def wait_http(url, timeout):
     return False
 
 
+def wait_file(path, timeout):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(path):
+            return True
+        time.sleep(5)
+    return False
+
+
+def _multi_import_ok():
+    """Exactly FIND_STUDIES studies behind the multi patient — import complete."""
+    name = urllib.parse.quote(MULTI["PatientName"])
+    url = qido_url(DIRECT["http"], f"PatientName={name}&limit=100")
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            body = resp.read()
+        n = len(json.loads(body) if body else [])  # QIDO empty result = 204, no body
+    except Exception as exc:
+        return False, repr(exc)
+    if n != FIND_STUDIES:
+        return False, f"{n} studies for {MULTI['PatientName']}, expected {FIND_STUDIES}"
+    return True, None
+
+
 def sanity():
     """Fail fast with a reason instead of producing an empty report."""
     checks = []
@@ -331,12 +364,17 @@ def sanity():
         checks.append({"check": "cecho_" + name, "ok": ok, "error": err})
         _t, ok, err = timed_http(target["http"] + "/dicom-web/studies?limit=1", timeout=30)
         checks.append({"check": "qido_" + name, "ok": ok, "error": err})
+    ok, err = _multi_import_ok()
+    checks.append({"check": "bench_multi_import", "ok": ok, "error": err})
+    _t, ok, err = timed_http(meta_url(DIRECT["http"], BIG[0]))
+    checks.append({"check": "bench_big_meta", "ok": ok, "error": err})
     return checks
 
 
 def main():
     meta = {"reps": REPS, "move_reps": MOVE_REPS, "cold_rounds": COLD_ROUNDS,
-            "instances_per_study": N, "studies": NUM_STUDIES,
+            "big_instances": BIG_INSTANCES, "find_studies": FIND_STUDIES,
+            "find_instances": FIND_INSTANCES,
             "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
     server = None
     rc = 0
@@ -346,6 +384,10 @@ def main():
         pacs_up = wait_http(DIRECT["http"] + "/dicom-web/studies?limit=1", 300)
         if not (proxy_up and pacs_up):
             meta["fatal"] = f"readiness timeout: proxy_up={proxy_up} pacs_up={pacs_up}"
+            rc = 1
+            return rc
+        if not wait_file(os.path.join(DATA_DIR, "pacs-done"), 900):
+            meta["fatal"] = "bench data import did not complete (no pacs-done)"
             rc = 1
             return rc
         meta["sanity"] = sanity()
