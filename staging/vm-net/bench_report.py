@@ -65,8 +65,9 @@ def render_markdown(summary, meta):
     lines = [
         "# dicorina latency bench",
         "",
-        "reps={reps} move_reps={move_reps} cold_rounds={cold_rounds} "
-        "instances_per_study={instances_per_study} studies={studies}".format(**meta),
+        f"reps={meta.get('reps')} move_reps={meta.get('move_reps')} "
+        f"cold_rounds={meta.get('cold_rounds')} big_instances={meta.get('big_instances')} "
+        f"find_studies={meta.get('find_studies')} find_instances={meta.get('find_instances')}",
         "",
         "| scenario | direct median/p95 (ms) | proxy median/p95 (ms) "
         "| overhead (ms) | ratio | errors d/p |",

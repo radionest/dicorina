@@ -9,7 +9,7 @@ def s(scenario, path, t_ms, ok=True, rep=0):
 
 
 META = {"reps": 20, "move_reps": 10, "cold_rounds": 2,
-        "instances_per_study": 50, "studies": 6}
+        "big_instances": 1000, "find_studies": 15, "find_instances": 2}
 
 
 def test_cell_stats_median_p95_errors():
@@ -65,3 +65,18 @@ def test_main_writes_outputs_and_exit_codes(tmp_path):
     src.write_text(json.dumps(bad), encoding="utf-8")
     rc = bench_report.main([str(src), "--out-md", str(out_md), "--out-json", str(out_json)])
     assert rc == 2
+
+
+def test_header_shows_bench_data_shape():
+    md = bench_report.render_markdown({}, META)
+    header = md.splitlines()[2]
+    assert "big_instances=1000" in header
+    assert "find_studies=15" in header
+    assert "find_instances=2" in header
+
+
+def test_header_tolerates_legacy_meta():
+    legacy = {"reps": 20, "move_reps": 10, "cold_rounds": 2,
+              "instances_per_study": 50, "studies": 6}
+    md = bench_report.render_markdown({}, legacy)  # must not raise
+    assert "reps=20" in md
