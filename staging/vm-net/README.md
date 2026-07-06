@@ -76,6 +76,7 @@ keeps the moves fast. e2e stays untouched: `pacs.json` loads no plugins and keep
 isolation; only `pacs-bench.json` enables DICOMweb and direct client access.
 
 `bench.sh` never gates on the numbers; its exit code reflects only whether data was
-produced: `0` report written; `1` infrastructure failure (proxy install, bench-data
-import, or readiness/timeout — no samples); `2` bench completed but no scenario
-yielded a valid sample, or a sanity check failed.
+produced: `0` report written; `1` host-side infrastructure failure (proxy install,
+bench-data import delta mismatch, or timeout with no result file); `2` the agent ran
+but recorded a fatal (readiness or import-wait timeout, failed sanity) or no scenario
+yielded a valid sample.
