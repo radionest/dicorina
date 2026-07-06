@@ -11,11 +11,18 @@ while [ ! -f "$R/bench-stop" ]; do
     systemctl stop dicorina
     rm -rf /var/cache/dicorina/*
     systemctl start dicorina
+    healthy=0
     for _ in $(seq 1 60); do
-      curl -fsS http://localhost:8042/health >/dev/null 2>&1 && break
+      curl -fsS http://localhost:8042/health >/dev/null 2>&1 && { healthy=1; break; }
       sleep 2
     done
-    touch "$R/bench-wipe-ack-$k"
+    # ack only a healthy restart; otherwise leave a host-visible failure marker so
+    # the agent's ack timeout points at the restart, not at the protocol
+    if [ "$healthy" = 1 ]; then
+      touch "$R/bench-wipe-ack-$k"
+    else
+      echo "wipe $k: dicorina not healthy 120s after restart" > "$R/bench-wipe-failed-$k"
+    fi
     k=$((k + 1))
   fi
   sleep 1

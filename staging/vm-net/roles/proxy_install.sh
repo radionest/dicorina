@@ -31,8 +31,15 @@ uv python install 3.12
 # a venv linked through /root is unreadable for User=dicorina (203/EXEC crash-loop).
 PY312="$(uv python find --no-project 3.12)"
 [ -n "$PY312" ] || { echo "FATAL: uv python find returned nothing" >&2; exit 1; }
-(cd /repo && DEST=/opt/dicorina PYTHON="$PY312" bash /repo/deploy/install.sh)
-chmod -R o+rX /opt/uv 2>/dev/null || true
+(cd /repo && DEST=/opt/dicorina PYTHON="$PY312" bash /repo/deploy/install.sh) \
+  || { echo "FATAL: deploy/install.sh failed" >&2; exit 1; }
+# install.sh created the dicorina system user/group: prefer group-scoped read on the
+# managed Python over world-readable; fall back to o+rX if the group is missing
+if chown -R root:dicorina /opt/uv 2>/dev/null; then
+  chmod -R g+rX,o-rwx /opt/uv 2>/dev/null || true
+else
+  chmod -R o+rX /opt/uv 2>/dev/null || true
+fi
 install -m 0644 "$CONFIG" /etc/dicorina/config.toml
 systemctl enable --now dicorina
 
