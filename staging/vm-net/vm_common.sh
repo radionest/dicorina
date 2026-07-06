@@ -33,7 +33,7 @@ vmnet_preflight() {
     if [ "$got" != "$want" ]; then
       echo "FATAL: PACS golden baked $got instances but this run expects $want (STUDIES=$STUDIES INSTANCES_PER_STUDY=$INSTANCES)."
       echo "  Rebuild: FORCE_REBUILD=pacs bash staging/vm-net/build-golden.sh"
-      echo "  Or match: export INSTANCES_PER_STUDY=$got first"
+      echo "  Or match: export STUDIES/INSTANCES_PER_STUDY so their product is $got"
       exit 1
     fi
   fi
@@ -95,4 +95,4 @@ ${body#\#!/bin/bash}"
   echo "booted $name ($ip)"
 }
 
-MNT='mkdir -p /repo; modprobe 9p 2>/dev/null||true; modprobe 9pnet_virtio 2>/dev/null||true; mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any repo /repo; mountpoint -q /repo || true'
+MNT='mkdir -p /repo; modprobe 9p 2>/dev/null||true; modprobe 9pnet_virtio 2>/dev/null||true; mountpoint -q /repo || mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,access=any repo /repo; mountpoint -q /repo || { echo "FATAL: /repo 9p mount failed" >&2; exit 1; }'
