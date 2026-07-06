@@ -48,15 +48,25 @@ def _write_instance(out_dir, study, sop_uid):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
+    ap.add_argument("--plan", choices=("e2e", "bench"), default="e2e")
     ap.add_argument("--studies", type=int, default=3)
     ap.add_argument("--instances", type=int, default=1000)
+    ap.add_argument("--big-instances", type=int, default=1000)
+    ap.add_argument("--find-studies", type=int, default=15)
+    ap.add_argument("--find-instances", type=int, default=2)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     for stale in glob.glob(os.path.join(args.out, "*.dcm")):
         os.remove(
             stale
         )  # drop stale instances so a smaller --studies/--instances can't leave extras
-    plan = study_plan.build_study_plan(args.studies, args.instances)
+    if args.plan == "bench":
+        bench = study_plan.build_bench_plan(
+            args.big_instances, args.find_studies, args.find_instances
+        )
+        plan = bench["big"] + bench["multi"]
+    else:
+        plan = study_plan.build_study_plan(args.studies, args.instances)
     n = 0
     for study in plan:
         for sop in study["SOPInstanceUIDs"]:

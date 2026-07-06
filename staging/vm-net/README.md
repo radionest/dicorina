@@ -49,3 +49,34 @@ observations, not gating asserts.
 ## Resource budget
 
 pacs 3072 MB · proxy 2048 MB · clientA/B 1024 MB each ≈ 7 GB of guests; fits in a 23 GB host with headroom.
+
+## Latency bench
+
+`bench.sh` boots 3 nodes (pacs with the DICOMweb plugin + CLIENTA as a known modality,
+proxy, clienta) and measures per-scenario latency direct vs through dicorina from the
+same client VM: interleaved reps, median/p95, overhead = median(proxy) − median(direct).
+Cold scenarios wipe the proxy cache between rounds (9p req/ack protocol); warm scenarios
+re-read what the cold pass cached. Report: `staging/.data/vm-net/bench-report.md`
+(+ raw samples in `bench-clienta.json`).
+
+Bench data is generated and imported into the bench PACS at bench start, never baked
+into the golden: two `BENCH_BIG_INSTANCES`-instance studies (`Bench^Big1/2`) drive the
+move/WADO scenarios, and one patient (`Bench^Multi`) with `BENCH_FIND_STUDIES` small
+studies drives `cfind_study`, which expects exactly that many matches — 2030 instances
+(~8 MB) at the defaults. The qido scenarios keep hitting the e2e patients baked into
+the golden.
+
+    FORCE_REBUILD=pacs bash staging/vm-net/build-golden.sh   # once: bakes libOrthancDicomWeb.so
+    bash staging/vm-net/bench.sh
+
+Knobs: `BENCH_REPS` (20), `BENCH_MOVE_REPS` (10), `BENCH_COLD_ROUNDS` (2),
+`BENCH_BIG_INSTANCES` (1000), `BENCH_FIND_STUDIES` (15), `BENCH_FIND_INSTANCES` (2),
+plus the usual `WORK`, `TIMEOUT`, `INSTANCES_PER_STUDY`. Debug runs: `BENCH_BIG_INSTANCES=50`
+keeps the moves fast. e2e stays untouched: `pacs.json` loads no plugins and keeps S0
+isolation; only `pacs-bench.json` enables DICOMweb and direct client access.
+
+`bench.sh` never gates on the numbers; its exit code reflects only whether data was
+produced: `0` report written; `1` host-side infrastructure failure (proxy install,
+bench-data import delta mismatch, or timeout with no result file); `2` the agent ran
+but recorded a fatal (readiness or import-wait timeout, failed sanity) or no scenario
+yielded a valid sample.

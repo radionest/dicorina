@@ -1,44 +1,13 @@
 #!/bin/bash
-# Runs inside the proxy VM. Installs dicorina via the REAL deploy/install.sh + systemd
-# (no Orthanc), starts the service from the stand config, waits for both clients, then
-# probes eviction and records proxy.json.
+# Runs inside the proxy VM (e2e). Shared install via proxy_install.sh, then the
+# e2e-specific tail: wait for both clients, probe eviction, record proxy.json.
 set -x
 R=/repo/staging/.data/vm-net
 BARRIER="$R/barrier"
 mkdir -p "$R" "$BARRIER"
 exec > >(tee -a "$R/proxy-provision.log" /dev/ttyS0) 2>&1
 
-# cloud-init's runcmd runs role.sh with HOME unset; uv installs to /root/.local/bin, but
-# "$HOME/.local/bin" then expands to "/.local/bin", leaving uv off install.sh's PATH and
-# aborting `uv sync` (set -e) before the service file is laid down. Pin HOME for root.
-export HOME=/root
-# uv brings its own managed Python 3.12 (proxy base image Python version is irrelevant).
-export PATH="$HOME/.local/bin:$PATH"
-command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"
-
-# install.sh uses relative paths (src/, pyproject.toml, deploy/config.example.toml,
-# deploy/dicorina.service via $OLDPWD) — must be invoked with CWD = repo root.
-# uv fetches a managed Python 3.12; place it in a world-readable dir so the dicorina service
-# user (User=dicorina) can read the interpreter the venv links to (default /root/.local/share/uv
-# is mode 700). NOTE: not host-verifiable — confirm at the live run.
-export UV_PYTHON_INSTALL_DIR=/opt/uv/python
-install -d -m 0755 /opt/uv
-(cd /repo && DEST=/opt/dicorina bash /repo/deploy/install.sh)
-chmod -R o+rX /opt/uv 2>/dev/null || true
-install -m 0644 /repo/staging/vm-net/config/proxy.toml /etc/dicorina/config.toml
-systemctl enable --now dicorina
-
-# wait for HTTP readiness
-HEALTHY=false
-for _ in $(seq 1 120); do
-  if curl -fsS http://localhost:8042/health >/dev/null 2>&1; then HEALTHY=true; break; fi
-  sleep 5
-done
-curl -s http://localhost:8042/health > "$R/proxy-health.json" || true
-if [ "$HEALTHY" = true ]; then
-  touch "$BARRIER/ready_proxy"
-else
+if ! bash /repo/staging/vm-net/roles/proxy_install.sh /repo/staging/vm-net/config/proxy.toml; then
   python3 - "$R/proxy.json" <<'PY'
 import json, sys
 json.dump({"role": "proxy", "studies_before_evict": 0, "studies_after_evict": 0},

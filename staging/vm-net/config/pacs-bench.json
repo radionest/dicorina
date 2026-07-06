@@ -1,0 +1,24 @@
+{
+  "Name": "vmnet-pacs-bench",
+  "DicomAet": "HOSPITALPACS",
+  "DicomPort": 4242,
+  "HttpPort": 8042,
+  "RemoteAccessAllowed": true,
+  "AuthenticationEnabled": false,
+  "DefaultEncoding": "Utf8",
+  "StorageDirectory": "/var/lib/orthanc/db",
+  "IndexDirectory": "/var/lib/orthanc/db",
+  "DicomCheckCalledAet": true,
+  "DicomAlwaysAllowEcho": false,
+  "DicomAlwaysAllowStore": false,
+  "DicomAlwaysAllowFind": false,
+  "DicomAlwaysAllowMove": false,
+  "DicomAlwaysAllowGet": false,
+  "Plugins": ["/opt/orthanc/plugins"],
+  "DicomWeb": { "Enable": true, "Root": "/dicom-web/" },
+  "DicomModalities": {
+    "dicorina1": ["DICORINA1", "10.0.0.20", 11112],
+    "dicorina2": ["DICORINA2", "10.0.0.20", 11113],
+    "clienta":   ["CLIENTA",   "10.0.0.31", 11112]
+  }
+}

@@ -101,6 +101,9 @@ write_files:
       curl -fsSL https://orthanc.uclouvain.be/downloads/linux-standard-base/orthanc/1.12.11/Orthanc \\
         -o /opt/orthanc/bin/Orthanc
       chmod +x /opt/orthanc/bin/Orthanc
+      install -d /opt/orthanc/plugins
+      curl -fsSL https://orthanc.uclouvain.be/downloads/linux-standard-base/orthanc-dicomweb/1.23/libOrthancDicomWeb.so \\
+        -o /opt/orthanc/plugins/libOrthancDicomWeb.so
       PYTHONPATH=/repo/staging/vm-net python3 /repo/staging/vm-net/gen_studies.py \\
         --out /var/lib/vmnet-studies --studies ${STUDIES} --instances ${INSTANCES}
       # Import into a tmpfs-backed store first (Orthanc fsyncs SQLite per stored instance,
