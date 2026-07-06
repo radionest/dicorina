@@ -21,8 +21,9 @@ from dimsechord import (
     MoveToSelfError,
     PoolExhaustedError,
     SeriesQuery,
+    build_storage_scu_contexts,
 )
-from pynetdicom import AE, StoragePresentationContexts, evt
+from pynetdicom import AE, evt
 from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     PatientRootQueryRetrieveInformationModelFind,
     PatientRootQueryRetrieveInformationModelMove,
@@ -40,6 +41,28 @@ if TYPE_CHECKING:
     from dicorina.dimse_face.allowlist import DestinationAllowlist
 
 logger = logging.getLogger(__name__)
+
+
+def _build_ae(aet: str) -> AE:
+    """Face AE: QR/Echo SCP contexts + storage SCU contexts for C-MOVE forwarding.
+
+    Requested contexts come from dimsechord's builder: one uncompressed context
+    per storage class plus one context per (image class × compressed TS), so the
+    sub-association can C-STORE cached instances verbatim in their original
+    transfer syntax (pass-through D7). pynetdicom's defaults are uncompressed-only.
+    """
+    ae = AE(ae_title=aet)
+    ae.require_called_aet = True
+    for cx in (
+        Verification,
+        PatientRootQueryRetrieveInformationModelFind,
+        StudyRootQueryRetrieveInformationModelFind,
+        PatientRootQueryRetrieveInformationModelMove,
+        StudyRootQueryRetrieveInformationModelMove,
+    ):
+        ae.add_supported_context(cx)
+    ae.requested_contexts = build_storage_scu_contexts()
+    return ae
 
 
 class DimseFace:
@@ -76,21 +99,7 @@ class DimseFace:
             return
         # The external face accepts only cfg.dimse.aet as called-AET; the pool
         # holds upstream identities and no longer names the face.
-        ae = AE(ae_title=self._aet)
-        ae.require_called_aet = True
-        for cx in (
-            Verification,
-            PatientRootQueryRetrieveInformationModelFind,
-            StudyRootQueryRetrieveInformationModelFind,
-            PatientRootQueryRetrieveInformationModelMove,
-            StudyRootQueryRetrieveInformationModelMove,
-        ):
-            ae.add_supported_context(cx)
-        # Storage SCU contexts: required for pynetdicom to form the sub-association
-        # that forwards C-STORE instances to the C-MOVE destination (pass-through D7).
-        for scx in StoragePresentationContexts:
-            if scx.abstract_syntax is not None:
-                ae.add_requested_context(scx.abstract_syntax)
+        ae = _build_ae(self._aet)
         handlers: list[Any] = [
             (evt.EVT_C_ECHO, self._on_echo),
             (evt.EVT_C_FIND, self._on_find),
