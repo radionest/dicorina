@@ -99,3 +99,12 @@ def test_wipe_failure_row_rendered():
     md = bench_report.render_markdown(summary, META)
     row = next(line for line in md.splitlines() if line.startswith("| wipe "))
     assert "FAILED" in row
+
+
+def test_zero_direct_median_renders_dash_ratio():
+    summary = bench_report.summarize(
+        [s("qido", "direct", 0.0), s("qido", "proxy", 25.0)]
+    )
+    md = bench_report.render_markdown(summary, META)  # must not raise
+    row = next(line for line in md.splitlines() if line.startswith("| qido "))
+    assert "| +25.0 | — |" in row

@@ -92,7 +92,8 @@ def render_markdown(summary, meta):
         overhead = ratio = "—"
         if proxy and direct and "median" in proxy and "median" in direct:
             overhead = f"{proxy['median'] - direct['median']:+.1f}"
-            ratio = f"{proxy['median'] / direct['median']:.2f}×"  # noqa: RUF001
+            if direct["median"]:
+                ratio = f"{proxy['median'] / direct['median']:.2f}×"  # noqa: RUF001
         lines.append(
             f"| {sc} | {_fmt(direct)}{note} | {_fmt(proxy)} "
             f"| {overhead} | {ratio} | {_errs(direct)} {_errs(proxy)} |"
