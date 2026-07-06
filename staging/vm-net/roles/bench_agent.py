@@ -246,28 +246,29 @@ def request_wipe(k, timeout=300):
 
 
 def bench_cold_rounds():
+    n_big = len(BIG)
     for rnd in range(COLD_ROUNDS):
-        split = bench_plan.cold_round_split(rnd, 2)
+        split = bench_plan.cold_round_split(rnd, n_big)
         if not request_wipe(rnd + 1):
             # surface the loss: error rows for every cold cell this round would
             # have produced, so the report shows errors instead of missing data
             record("wipe", "proxy", rnd, 0.0, False, "wipe ack timeout")
             skipped = "skipped: wipe ack timeout"
             for idx, study in enumerate(BIG):
-                rep = rnd * 2 + idx
+                rep = rnd * n_big + idx
                 uid = study["StudyInstanceUID"]
                 record("wado_meta_cold", "proxy", rep, 0.0, False, skipped, uid)
                 record("wado_meta_cold", "direct", rep, 0.0, False, skipped, uid)
             for name in ("cmove_cold", "wado_frame_cold"):
                 for idx in split[name]:
-                    rep = rnd * 2 + idx
+                    rep = rnd * n_big + idx
                     uid = BIG[idx]["StudyInstanceUID"]
                     record(name, "proxy", rep, 0.0, False, skipped, uid)
                     record(name, "direct", rep, 0.0, False, skipped, uid)
             continue
         # metadata first: pass-through, does NOT populate the study cache
         for idx, study in enumerate(BIG):
-            rep = rnd * 2 + idx
+            rep = rnd * n_big + idx
             t_ms, ok, err = timed_http(meta_url(PROXY["http"], study))
             record("wado_meta_cold", "proxy", rep, t_ms, ok, err, study["StudyInstanceUID"])
             t_ms, ok, err = timed_http(meta_url(DIRECT["http"], study))
@@ -275,7 +276,7 @@ def bench_cold_rounds():
         for idx in split["cmove_cold"]:
             study = BIG[idx]
             uid = study["StudyInstanceUID"]
-            rep = rnd * 2 + idx
+            rep = rnd * n_big + idx
             t_ms, ok, err = timed_cmove(PROXY, uid, BIG_INSTANCES)
             record("cmove_cold", "proxy", rep, t_ms, ok, err, uid)
             t_ms, ok, err = timed_cmove(DIRECT, uid, BIG_INSTANCES)
@@ -283,7 +284,7 @@ def bench_cold_rounds():
         for idx in split["wado_frame_cold"]:
             study = BIG[idx]
             uid = study["StudyInstanceUID"]
-            rep = rnd * 2 + idx
+            rep = rnd * n_big + idx
             t_ms, ok, err = timed_http(frame_url(PROXY["http"], study))
             record("wado_frame_cold", "proxy", rep, t_ms, ok, err, uid)
             t_ms, ok, err = timed_http(frame_url(DIRECT["http"], study))
