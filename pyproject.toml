@@ -1,6 +1,6 @@
 [project]
 name = "dicorina"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pure-Python DICOM + DICOMweb pass-through proxy for a C-MOVE-only PACS."
 requires-python = ">=3.12"
 authors = [{ name = "Denis Nesterov" }]
