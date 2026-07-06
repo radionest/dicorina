@@ -24,7 +24,10 @@ SCENARIO_ORDER = [
     "qido", "qido_warm",
     "wado_meta_cold", "wado_meta_warm",
     "wado_frame_cold", "wado_frame_warm",
+    "wipe",  # emitted only on a cache-wipe ack timeout; absent on healthy runs
 ]
+
+SMALL_N = 5  # flag cells whose stats rest on fewer ok samples than this
 
 
 def p95(xs):
@@ -54,7 +57,10 @@ def summarize(samples):
 def _fmt(cell):
     if not cell or "median" not in cell:
         return "FAILED"
-    return f"{cell['median']:.1f} / {cell['p95']:.1f}"
+    out = f"{cell['median']:.1f} / {cell['p95']:.1f}"
+    if cell["n"] - cell["errors"] < SMALL_N:
+        out += f" (n={cell['n'] - cell['errors']})"
+    return out
 
 
 def _errs(cell):

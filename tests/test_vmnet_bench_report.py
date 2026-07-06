@@ -80,3 +80,22 @@ def test_header_tolerates_legacy_meta():
               "instances_per_study": 50, "studies": 6}
     md = bench_report.render_markdown({}, legacy)  # must not raise
     assert "reps=20" in md
+
+
+def test_small_n_flagged_in_cells():
+    summary = bench_report.summarize(
+        [s("cmove_cold", "direct", 10.0 + i, rep=i) for i in range(2)]
+        + [s("qido", "proxy", 5.0, rep=i) for i in range(5)]
+    )
+    md = bench_report.render_markdown(summary, META)
+    cold = next(line for line in md.splitlines() if line.startswith("| cmove_cold "))
+    qido = next(line for line in md.splitlines() if line.startswith("| qido "))
+    assert "(n=2)" in cold
+    assert "(n=" not in qido
+
+
+def test_wipe_failure_row_rendered():
+    summary = bench_report.summarize([s("wipe", "proxy", 0.0, ok=False)])
+    md = bench_report.render_markdown(summary, META)
+    row = next(line for line in md.splitlines() if line.startswith("| wipe "))
+    assert "FAILED" in row

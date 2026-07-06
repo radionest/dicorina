@@ -247,10 +247,24 @@ def request_wipe(k, timeout=300):
 
 def bench_cold_rounds():
     for rnd in range(COLD_ROUNDS):
-        if not request_wipe(rnd + 1):
-            record("wipe", "proxy", rnd, 0.0, False, "wipe ack timeout")
-            continue
         split = bench_plan.cold_round_split(rnd, 2)
+        if not request_wipe(rnd + 1):
+            # surface the loss: error rows for every cold cell this round would
+            # have produced, so the report shows errors instead of missing data
+            record("wipe", "proxy", rnd, 0.0, False, "wipe ack timeout")
+            skipped = "skipped: wipe ack timeout"
+            for idx, study in enumerate(BIG):
+                rep = rnd * 2 + idx
+                uid = study["StudyInstanceUID"]
+                record("wado_meta_cold", "proxy", rep, 0.0, False, skipped, uid)
+                record("wado_meta_cold", "direct", rep, 0.0, False, skipped, uid)
+            for name in ("cmove_cold", "wado_frame_cold"):
+                for idx in split[name]:
+                    rep = rnd * 2 + idx
+                    uid = BIG[idx]["StudyInstanceUID"]
+                    record(name, "proxy", rep, 0.0, False, skipped, uid)
+                    record(name, "direct", rep, 0.0, False, skipped, uid)
+            continue
         # metadata first: pass-through, does NOT populate the study cache
         for idx, study in enumerate(BIG):
             rep = rnd * 2 + idx
@@ -344,7 +358,8 @@ def wait_file(path, timeout):
 def _multi_import_ok():
     """Exactly FIND_STUDIES studies behind the multi patient — import complete."""
     name = urllib.parse.quote(MULTI["PatientName"])
-    url = qido_url(DIRECT["http"], f"PatientName={name}&limit=100")
+    limit = max(100, FIND_STUDIES + 1)  # +1 so an over-count is still detectable
+    url = qido_url(DIRECT["http"], f"PatientName={name}&limit={limit}")
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:
             body = resp.read()
