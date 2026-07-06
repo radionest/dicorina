@@ -158,7 +158,7 @@ def test_on_find_bare_timeout_logs_type_and_context(caplog) -> None:
 
 
 def test_face_ae_requests_compressed_storage_contexts() -> None:
-    """The forwarding SCU must propose per-(SOP class × compressed TS) contexts,
+    """The forwarding SCU must propose per-(SOP class x compressed TS) contexts,
     not pynetdicom's uncompressed-only defaults — otherwise every compressed
     instance fails its C-STORE sub-operation at the C-MOVE destination
     (observed live: Completed=5, Failed=807 on a JPEG Lossless series)."""

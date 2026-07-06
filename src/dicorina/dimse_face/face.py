@@ -47,7 +47,7 @@ def _build_ae(aet: str) -> AE:
     """Face AE: QR/Echo SCP contexts + storage SCU contexts for C-MOVE forwarding.
 
     Requested contexts come from dimsechord's builder: one uncompressed context
-    per storage class plus one context per (image class × compressed TS), so the
+    per storage class plus one context per (image class x compressed TS), so the
     sub-association can C-STORE cached instances verbatim in their original
     transfer syntax (pass-through D7). pynetdicom's defaults are uncompressed-only.
     """
