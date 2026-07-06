@@ -4,10 +4,14 @@ siblings of ProxyService's HTTP pass-through (see tests/unit/test_service.py).""
 
 from __future__ import annotations
 
+import asyncio
 import gc
+import logging
+import threading
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from pydicom import Dataset
 from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     StudyRootQueryRetrieveInformationModelFind,
@@ -25,9 +29,9 @@ def _event(identifier: Dataset, model: object) -> Any:
     )
 
 
-def _face(query: Any, *, cfind_timeout: float = 30.0) -> DimseFace:
+def _face(query: Any, *, loop: Any = None, cfind_timeout: float = 30.0) -> DimseFace:
     none: Any = None
-    return DimseFace(none, none, query, none, none, none, "DICORINA", cfind_timeout=cfind_timeout)
+    return DimseFace(none, none, query, none, none, loop, "DICORINA", cfind_timeout=cfind_timeout)
 
 
 def test_on_find_passes_cfind_timeout() -> None:
@@ -79,3 +83,75 @@ def test_on_find_closes_upstream_deterministically() -> None:
         assert closed == ["closed"]
     finally:
         gc.enable()
+
+
+@pytest.fixture
+def running_loop():
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        yield loop
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=2)
+        loop.close()
+
+
+def test_run_propagates_coroutine_timeout_verbatim(running_loop) -> None:
+    """A TimeoutError raised inside the coroutine keeps its message; only the
+    future.result wall-clock timeout gets relabelled."""
+    face = _face(None, loop=running_loop)
+
+    async def _boom() -> None:
+        raise TimeoutError("association timed out")
+
+    with pytest.raises(TimeoutError) as excinfo:
+        face._run(_boom())
+
+    assert str(excinfo.value) == "association timed out"
+    assert "wall-clock" not in str(excinfo.value)
+
+
+def test_run_relabels_wall_clock_timeout(running_loop) -> None:
+    """future.result timing out while the coroutine still runs must not surface a
+    TimeoutError whose str() is empty (the undiagnosable production failure)."""
+    face = _face(None, loop=running_loop)
+    face._cfind_timeout = -4.9  # wall_clock = cfind_timeout + 5.0 ≈ 0.1s
+
+    release = asyncio.Event()
+
+    async def _hang() -> None:
+        await release.wait()
+
+    with pytest.raises(TimeoutError) as excinfo:
+        face._run(_hang())
+
+    running_loop.call_soon_threadsafe(release.set)  # let the coroutine finish cleanly
+    assert "wall-clock" in str(excinfo.value)
+
+
+def test_on_find_bare_timeout_logs_type_and_context(caplog) -> None:
+    """A bare TimeoutError from upstream must not produce an empty
+    'DIMSE C-FIND failed:' log line — it must carry type + query context."""
+
+    def fake_iter_find(identifier, *, model, timeout=None):  # noqa: ARG001
+        raise TimeoutError  # empty str() — the production failure mode
+        yield  # unreachable; makes this a generator like the real iter_find
+
+    ident = Dataset()
+    ident.QueryRetrieveLevel = "STUDY"
+    ident.StudyInstanceUID = "1.2.3.4"
+
+    face = _face(SimpleNamespace(iter_find=fake_iter_find))
+    with caplog.at_level(logging.ERROR, logger="dicorina.dimse_face.face"):
+        out = list(face._on_find(_event(ident, StudyRootQueryRetrieveInformationModelFind)))
+
+    assert out == [(0xC000, None)]
+    assert caplog.records, "expected an error log record"
+    record = caplog.records[0]
+    msg = record.getMessage()
+    assert "TimeoutError" in msg
+    assert "level=STUDY" in msg
+    assert "1.2.3.4" in msg
+    assert record.exc_info is not None  # logger.exception attaches the traceback
