@@ -155,3 +155,34 @@ def test_on_find_bare_timeout_logs_type_and_context(caplog) -> None:
     assert "level=STUDY" in msg
     assert "1.2.3.4" in msg
     assert record.exc_info is not None  # logger.exception attaches the traceback
+
+
+def test_face_ae_requests_compressed_storage_contexts() -> None:
+    """The forwarding SCU must propose per-(SOP class x compressed TS) contexts,
+    not pynetdicom's uncompressed-only defaults — otherwise every compressed
+    instance fails its C-STORE sub-operation at the C-MOVE destination
+    (observed live: Completed=5, Failed=807 on a JPEG Lossless series)."""
+    from dimsechord import DEFAULT_COMPRESSED_TRANSFER_SYNTAXES
+
+    from dicorina.dimse_face.face import _build_ae
+
+    ae = _build_ae("DICORINA")
+    contexts = ae.requested_contexts
+    assert 0 < len(contexts) <= 128
+
+    ct = "1.2.840.10008.5.1.4.1.1.2"  # CT Image Storage
+    ct_contexts = [cx for cx in contexts if cx.abstract_syntax == ct]
+
+    # One single-TS context per compressed transfer syntax.
+    single_ts = {
+        cx.transfer_syntax[0] for cx in ct_contexts if len(cx.transfer_syntax) == 1
+    }
+    assert set(DEFAULT_COMPRESSED_TRANSFER_SYNTAXES) <= single_ts
+
+    # Uncompressed traffic stays covered (Explicit VR LE present in a
+    # multi-TS context; pynetdicom interconverts uncompressed TS on send).
+    assert any(
+        "1.2.840.10008.1.2.1" in cx.transfer_syntax
+        for cx in ct_contexts
+        if len(cx.transfer_syntax) > 1
+    )
