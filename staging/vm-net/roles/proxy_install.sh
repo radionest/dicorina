@@ -2,7 +2,7 @@
 # Shared proxy provisioning (e2e run.sh + bench.sh): install dicorina via the REAL
 # deploy/install.sh + systemd, start the service with the given config, wait for HTTP
 # health. Exit 0 (+ touch $BARRIER/ready_proxy) when healthy, 1 otherwise.
-set -x
+set -euxo pipefail
 R=/repo/staging/.data/vm-net
 BARRIER="$R/barrier"
 mkdir -p "$R" "$BARRIER"
