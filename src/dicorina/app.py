@@ -32,6 +32,13 @@ def _configure_pydicom() -> None:
     import pydicom.config
 
     pydicom.config.settings.reading_validation_mode = pydicom.config.IGNORE
+    # Some upstream (Philips) private elements carry a value whose byte length is
+    # incompatible with the VR pydicom infers (e.g. (01F1,1026) = b'1.127 ', 6 bytes
+    # read as an 8-byte double). On re-encode for the C-MOVE forward, pydicom would
+    # raise BytesLengthException and the whole C-STORE sub-operation fails — silently
+    # dropping every instance that carries the element. Coerce such elements to UN so
+    # the dataset relays verbatim instead of failing to encode.
+    pydicom.config.convert_wrong_length_to_UN = True
 
 
 @asynccontextmanager
