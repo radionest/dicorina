@@ -14,6 +14,10 @@ WorkingDirectory=/opt/dicorina
 ExecStart=/opt/dicorina/.venv/bin/dicorina
 Restart=on-failure
 RestartSec=5
+# Headroom over cache.memory_max_size_gb (4 GB estimated pixel payloads);
+# actual dataset RSS exceeds the estimate, so cap above the budget.
+MemoryHigh=5G
+MemoryMax=6G
 
 [Install]
 WantedBy=multi-user.target
