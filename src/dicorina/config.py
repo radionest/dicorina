@@ -61,6 +61,8 @@ class HttpConfig(BaseModel):
 
 
 class CacheConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     dir: Path
     memory_ttl_minutes: int = 30
     memory_max_size_gb: float = 4.0
