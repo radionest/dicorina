@@ -26,9 +26,9 @@ colorama==0.4.6 ; sys_platform == 'win32' \
     --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
     --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
     # via click
-dimsechord==0.5.1 \
-    --hash=sha256:7fda95c8c5aad7e7db1b3c0e7e99fe9ba739c21618f083989342a85f1b3bac8b \
-    --hash=sha256:aa3d1618f3a663abab38c80df051d8f7ff40f92cd130e8aec37922d0035a9612
+dimsechord==0.6.0 \
+    --hash=sha256:8c86c3353e8222e3cb282c3e46a124f4eae55e7201035b06085b9c9bb5d16f93 \
+    --hash=sha256:e705a7faf5fc6a92e51bfd71ad7374ef75cbd01b6045126b1835184969a34b19
     # via dicorina
 fastapi==0.138.1 \
     --hash=sha256:96e3702dce09ee0dce48856135620d3d865ca684a79fe7513fd7b13a12f82862 \
