@@ -61,9 +61,11 @@ class HttpConfig(BaseModel):
 
 
 class CacheConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     dir: Path
     memory_ttl_minutes: int = 30
-    memory_max_entries: int = 50
+    memory_max_size_gb: float = 4.0
     disk_ttl_hours: int = 24
     disk_max_size_gb: float = 10.0
     qido_ttl_seconds: float = 5.0

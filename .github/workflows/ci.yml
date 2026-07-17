@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Check lockfile is up to date
+        run: uv lock --check
+      - name: Check deploy/requirements.txt is up to date
+        run: |
+          uv export --no-dev --no-emit-project --format requirements-txt -o deploy/requirements.txt
+          git diff --exit-code deploy/requirements.txt
+      - run: uv sync
+      - run: uv run ruff check src tests
+      - run: uv run mypy src
+      - run: uv run pytest

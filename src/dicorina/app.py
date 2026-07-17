@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
         ttl_hours=cfg.cache.disk_ttl_hours,
         max_size_gb=cfg.cache.disk_max_size_gb,
         memory_ttl_minutes=cfg.cache.memory_ttl_minutes,
-        memory_max_entries=cfg.cache.memory_max_entries,
+        memory_max_size_gb=cfg.cache.memory_max_size_gb,
     )
     pacs = DicomNode(aet=cfg.pacs.aet, host=cfg.pacs.host, port=cfg.pacs.port)
     engine = PullEngine(

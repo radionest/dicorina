@@ -1,8 +1,10 @@
+from importlib.metadata import version
+
 import dicorina
 
 
 def test_package_imports() -> None:
-    assert dicorina.__version__ == "0.1.0"
+    assert dicorina.__version__ == version("dicorina")
 
 
 def test_dimsechord_is_available() -> None:

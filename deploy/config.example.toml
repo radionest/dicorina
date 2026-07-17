@@ -69,8 +69,8 @@ auth_token = ""
 dir = "/var/cache/dicorina"
 # In-memory cache: TTL in minutes
 memory_ttl_minutes = 30
-# In-memory cache: maximum number of entries
-memory_max_entries = 50
+# In-memory cache: maximum size in gigabytes
+memory_max_size_gb = 4.0
 # Disk cache: TTL in hours
 disk_ttl_hours = 24
 # Disk cache: maximum size in gigabytes

@@ -29,6 +29,7 @@ def test_load_minimal_applies_defaults(tmp_path: Path) -> None:
     assert cfg.http.bind_host == "127.0.0.1"
     assert cfg.http.auth_token == ""
     assert cfg.cache.qido_ttl_seconds == 5.0
+    assert cfg.cache.memory_max_size_gb == 4.0
     assert cfg.timeouts.cmove == 300.0
     assert cfg.timeouts.find_lease == 30.0
 
@@ -104,6 +105,13 @@ def test_legacy_scp_port_rejected(tmp_path: Path) -> None:
         '[cache]\ndir = "/var/cache/dicorina"\n',
         encoding="utf-8",
     )
+    with pytest.raises(ValueError):
+        load_config(cfg_file)
+
+
+def test_legacy_memory_max_entries_rejected(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(_MINIMAL + "memory_max_entries = 50\n", encoding="utf-8")
     with pytest.raises(ValueError):
         load_config(cfg_file)
 
