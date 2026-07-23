@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from dimsechord import SeriesResult
 from pydicom import Dataset
 from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     StudyRootQueryRetrieveInformationModelFind,
@@ -29,9 +30,18 @@ def _event(identifier: Dataset, model: object) -> Any:
     )
 
 
-def _face(query: Any, *, loop: Any = None, cfind_timeout: float = 30.0) -> DimseFace:
+def _face(
+    query: Any,
+    *,
+    engine: Any = None,
+    client: Any = None,
+    loop: Any = None,
+    cfind_timeout: float = 30.0,
+) -> DimseFace:
     none: Any = None
-    return DimseFace(none, none, query, none, none, loop, "DICORINA", cfind_timeout=cfind_timeout)
+    return DimseFace(
+        engine, client, query, none, none, loop, "DICORINA", cfind_timeout=cfind_timeout
+    )
 
 
 def test_on_find_passes_cfind_timeout() -> None:
@@ -186,3 +196,55 @@ def test_face_ae_requests_compressed_storage_contexts() -> None:
         for cx in ct_contexts
         if len(cx.transfer_syntax) > 1
     )
+
+
+def _series_result(study: str, series: str, n: int) -> SeriesResult:
+    return SeriesResult(
+        study_instance_uid=study,
+        series_instance_uid=series,
+        number_of_series_related_instances=n,
+    )
+
+
+def test_series_move_counts_only_requested_series(running_loop, caplog) -> None:
+    """A backend that ignores the SeriesInstanceUID matching key returns one result
+    per series in the study; only the requested series may be counted (#21)."""
+    results = [_series_result("1.2", "1.2.1", 2), _series_result("1.2", "1.2.9", 3)]
+
+    async def find_series(query, peer, timeout=30.0):  # noqa: ARG001, ASYNC109
+        return results
+
+    sentinel = iter(())
+    face = _face(
+        None,
+        engine=SimpleNamespace(iter_series=lambda *_a: sentinel),
+        client=SimpleNamespace(find_series=find_series),
+        loop=running_loop,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="dicorina.dimse_face.face"):
+        count, iterator = face._series_move("1.2", "1.2.1")
+
+    assert count == 2
+    assert iterator is sentinel
+    assert "SeriesInstanceUID matching key" in caplog.text
+
+
+def test_series_move_no_warning_when_backend_conformant(running_loop, caplog) -> None:
+    results = [_series_result("1.2", "1.2.1", 4)]
+
+    async def find_series(query, peer, timeout=30.0):  # noqa: ARG001, ASYNC109
+        return results
+
+    face = _face(
+        None,
+        engine=SimpleNamespace(iter_series=lambda *_a: iter(())),
+        client=SimpleNamespace(find_series=find_series),
+        loop=running_loop,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="dicorina.dimse_face.face"):
+        count, _ = face._series_move("1.2", "1.2.1")
+
+    assert count == 4
+    assert "matching key" not in caplog.text

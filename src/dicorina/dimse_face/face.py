@@ -247,7 +247,18 @@ class DimseFace:
                 timeout=self._cfind_timeout,
             )
         )
-        count = sum((r.number_of_series_related_instances or 0) for r in results)
+        matching = [r for r in results if r.series_instance_uid == series]
+        if len(matching) != len(results):
+            logger.warning(
+                "backend PACS ignored SeriesInstanceUID matching key: %d of %d "
+                "series-level C-FIND results match series=%s (study=%s); "
+                "counting matching results only",
+                len(matching),
+                len(results),
+                series,
+                study,
+            )
+        count = sum((r.number_of_series_related_instances or 0) for r in matching)
         return count, self._engine.iter_series(study, series)
 
     def _study_move(self, study: str) -> tuple[int, Iterator[Dataset]]:
