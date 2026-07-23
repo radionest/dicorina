@@ -277,3 +277,74 @@ def test_study_move_filters_foreign_study_results(running_loop, caplog) -> None:
     assert count == 2
     assert captured["args"] == ("1.2", ["1.2.1"])
     assert "StudyInstanceUID matching key" in caplog.text
+
+
+def test_series_move_falls_back_when_no_result_matches(running_loop, caplog) -> None:
+    """A backend that widens the match AND does not echo the requested UID must not
+    produce count=0 while instances still stream -- fall back to the unfiltered total."""
+    results = [_series_result("1.2", "1.2.9", 3)]
+
+    async def find_series(query, peer, timeout=30.0):  # noqa: ARG001, ASYNC109
+        return results
+
+    face = _face(
+        None,
+        engine=SimpleNamespace(iter_series=lambda *_a: iter(())),
+        client=SimpleNamespace(find_series=find_series),
+        loop=running_loop,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="dicorina.dimse_face.face"):
+        count, _ = face._series_move("1.2", "1.2.1")
+
+    assert count == 3
+    assert "falling back to the unfiltered total" in caplog.text
+
+
+def test_study_move_falls_back_when_no_result_matches(running_loop, caplog) -> None:
+    results = [_series_result("9.9", "9.9.1", 7)]
+
+    async def find_series(query, peer, timeout=30.0):  # noqa: ARG001, ASYNC109
+        return results
+
+    captured: dict[str, Any] = {}
+
+    def iter_study(study, series_uids):
+        captured["args"] = (study, series_uids)
+        return iter(())
+
+    face = _face(
+        None,
+        engine=SimpleNamespace(iter_study=iter_study),
+        client=SimpleNamespace(find_series=find_series),
+        loop=running_loop,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="dicorina.dimse_face.face"):
+        count, _ = face._study_move("1.2")
+
+    assert count == 7
+    assert captured["args"] == ("1.2", ["9.9.1"])
+    assert "falling back to the unfiltered total" in caplog.text
+
+
+def test_nonconformant_warning_logged_once_per_key(running_loop, caplog) -> None:
+    """Repeat offenses by the same backend must not spam WARNING on every C-MOVE."""
+    results = [_series_result("1.2", "1.2.1", 2), _series_result("1.2", "1.2.9", 3)]
+
+    async def find_series(query, peer, timeout=30.0):  # noqa: ARG001, ASYNC109
+        return results
+
+    face = _face(
+        None,
+        engine=SimpleNamespace(iter_series=lambda *_a: iter(())),
+        client=SimpleNamespace(find_series=find_series),
+        loop=running_loop,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="dicorina.dimse_face.face"):
+        face._series_move("1.2", "1.2.1")
+        face._series_move("1.2", "1.2.1")
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1

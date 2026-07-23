@@ -89,6 +89,7 @@ class DimseFace:
         self._cfind_timeout = cfind_timeout
         self._cmove_count_timeout = cmove_count_timeout
         self._server: Any | None = None
+        self._warned_keys: set[str] = set()
 
     @property
     def is_running(self) -> bool:
@@ -138,6 +139,14 @@ class DimseFace:
                 f"upstream DICOM call did not finish within {wall_clock:.0f}s wall-clock "
                 f"(PACS slow or returned too many results)"
             ) from exc
+
+    def _warn_once(self, key: str, msg: str, *args: object) -> None:
+        """First occurrence per key logs WARNING; repeats drop to DEBUG (log-spam guard)."""
+        if key in self._warned_keys:
+            logger.debug(msg, *args)
+            return
+        self._warned_keys.add(key)
+        logger.warning(msg, *args)
 
     def _on_find(self, event: evt.Event) -> Iterator[tuple[int, Dataset | None]]:
         ident = event.identifier
@@ -248,8 +257,19 @@ class DimseFace:
             )
         )
         matching = [r for r in results if r.series_instance_uid == series]
-        if len(matching) != len(results):
-            logger.warning(
+        if not matching and results:
+            self._warn_once(
+                "series-fallback",
+                "backend PACS returned %d series-level C-FIND results, none matching "
+                "series=%s (study=%s); falling back to the unfiltered total",
+                len(results),
+                series,
+                study,
+            )
+            matching = results
+        elif len(matching) < len(results):
+            self._warn_once(
+                "series-filter",
                 "backend PACS ignored SeriesInstanceUID matching key: %d of %d "
                 "series-level C-FIND results match series=%s (study=%s); "
                 "counting matching results only",
@@ -268,8 +288,18 @@ class DimseFace:
             )
         )
         matching = [r for r in results if r.study_instance_uid == study]
-        if len(matching) != len(results):
-            logger.warning(
+        if not matching and results:
+            self._warn_once(
+                "study-fallback",
+                "backend PACS returned %d series-level C-FIND results, none matching "
+                "study=%s; falling back to the unfiltered total",
+                len(results),
+                study,
+            )
+            matching = results
+        elif len(matching) < len(results):
+            self._warn_once(
+                "study-filter",
                 "backend PACS ignored StudyInstanceUID matching key: %d of %d "
                 "series-level C-FIND results match study=%s; "
                 "counting matching results only",

@@ -37,6 +37,7 @@ class FakePacs:
         # Emulate a backend that ignores SeriesInstanceUID as a matching key at
         # series level (C-FIND only; C-MOVE delivery stays faithful) -- issue #21.
         self.widen_series_find: bool = False
+        self.widen_study_find: bool = False  # same, for the StudyInstanceUID key
         self.active_associations = 0
         self._assoc_lock = threading.Lock()
 
@@ -113,9 +114,12 @@ class FakePacs:
             yield (self.fail_find_with, None)
             return
         match_ident = identifier
-        if self.widen_series_find and level == "SERIES" and "SeriesInstanceUID" in identifier:
+        if level == "SERIES" and (self.widen_series_find or self.widen_study_find):
             match_ident = deepcopy(identifier)
-            del match_ident.SeriesInstanceUID
+            if self.widen_series_find and "SeriesInstanceUID" in match_ident:
+                del match_ident.SeriesInstanceUID
+            if self.widen_study_find and "StudyInstanceUID" in match_ident:
+                del match_ident.StudyInstanceUID
         matches = self._match(match_ident)
 
         seen: set[str] = set()
