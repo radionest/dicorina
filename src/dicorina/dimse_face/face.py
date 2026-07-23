@@ -267,6 +267,16 @@ class DimseFace:
                 SeriesQuery(study_instance_uid=study), self._pacs, timeout=self._cfind_timeout
             )
         )
-        series_uids = [r.series_instance_uid for r in results]
-        count = sum((r.number_of_series_related_instances or 0) for r in results)
+        matching = [r for r in results if r.study_instance_uid == study]
+        if len(matching) != len(results):
+            logger.warning(
+                "backend PACS ignored StudyInstanceUID matching key: %d of %d "
+                "series-level C-FIND results match study=%s; "
+                "counting matching results only",
+                len(matching),
+                len(results),
+                study,
+            )
+        series_uids = [r.series_instance_uid for r in matching]
+        count = sum((r.number_of_series_related_instances or 0) for r in matching)
         return count, self._engine.iter_study(study, series_uids)

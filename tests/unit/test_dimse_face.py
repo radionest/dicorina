@@ -248,3 +248,32 @@ def test_series_move_no_warning_when_backend_conformant(running_loop, caplog) ->
 
     assert count == 4
     assert "matching key" not in caplog.text
+
+
+def test_study_move_filters_foreign_study_results(running_loop, caplog) -> None:
+    """Foreign-study rows from a match-widening backend must not leak into the
+    sub-operation count nor into the series list handed to iter_study."""
+    results = [_series_result("1.2", "1.2.1", 2), _series_result("9.9", "9.9.1", 7)]
+
+    async def find_series(query, peer, timeout=30.0):  # noqa: ARG001, ASYNC109
+        return results
+
+    captured: dict[str, Any] = {}
+
+    def iter_study(study, series_uids):
+        captured["args"] = (study, series_uids)
+        return iter(())
+
+    face = _face(
+        None,
+        engine=SimpleNamespace(iter_study=iter_study),
+        client=SimpleNamespace(find_series=find_series),
+        loop=running_loop,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="dicorina.dimse_face.face"):
+        count, _ = face._study_move("1.2")
+
+    assert count == 2
+    assert captured["args"] == ("1.2", ["1.2.1"])
+    assert "StudyInstanceUID matching key" in caplog.text
