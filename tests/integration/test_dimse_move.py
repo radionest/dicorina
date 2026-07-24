@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import pytest
@@ -108,3 +109,131 @@ async def test_cmove_unknown_destination_refused(app_client, seeded_study) -> No
 
     statuses = await asyncio.to_thread(_run_scu)
     assert 0xA801 in statuses  # Move Destination unknown
+
+
+@pytest.mark.asyncio
+async def test_series_cmove_counters_against_match_widening_backend(
+    app_client, seeded_study, fake_pacs, free_port
+) -> None:
+    """Pending C-MOVE-RSP sub-operation counters must reflect the requested series,
+    not the whole study, even when the backend PACS ignores the SeriesInstanceUID
+    matching key at series level (#21). Delivery must stay series-exact."""
+    _, ctx = app_client
+    study = seeded_study["study"][0]
+    series = seeded_study["series"][0]
+    expected = set(seeded_study[series])
+    fake_pacs.widen_series_find = True
+
+    recv_port = free_port()
+    recv = _Receiver()
+    recv.start(recv_port, "WORKSTATION")
+    from dicorina.dimse_face.allowlist import Destination
+
+    ctx["app"].state.dimse._allowlist._dests["WORKSTATION"] = Destination("127.0.0.1", recv_port)
+
+    def _run_scu() -> list:
+        from pydicom.dataset import Dataset
+
+        ae = AE(ae_title="WORKSTATION")
+        ae.add_requested_context(StudyRootQueryRetrieveInformationModelMove)
+        assoc = ae.associate("127.0.0.1", ctx["cfg"].dimse.listen_port, ae_title=ctx["face_aet"])
+        assert assoc.is_established
+
+        query = Dataset()
+        query.QueryRetrieveLevel = "SERIES"
+        query.StudyInstanceUID = study
+        query.SeriesInstanceUID = series
+        statuses = list(
+            assoc.send_c_move(query, "WORKSTATION", StudyRootQueryRetrieveInformationModelMove)
+        )
+        assoc.release()
+
+        deadline = time.time() + 15
+        while len(recv.received) < len(expected) and time.time() < deadline:
+            time.sleep(0.2)
+        return statuses
+
+    try:
+        statuses = await asyncio.to_thread(_run_scu)
+        pending = [s for s, _ in statuses if s is not None and s.Status == 0xFF00]
+        assert pending, "expected at least one pending C-MOVE-RSP"
+        for s in pending:
+            total = (
+                getattr(s, "NumberOfRemainingSuboperations", 0)
+                + getattr(s, "NumberOfCompletedSuboperations", 0)
+                + getattr(s, "NumberOfFailedSuboperations", 0)
+                + getattr(s, "NumberOfWarningSuboperations", 0)
+            )
+            assert total == len(expected)
+        assert any(s.Status == 0x0000 for s, _ in statuses if s is not None)
+        assert set(recv.received) == expected
+    finally:
+        recv.stop()
+
+
+@pytest.mark.asyncio
+async def test_study_cmove_counters_against_match_widening_backend(
+    app_client, seeded_study, fake_pacs, free_port, caplog
+) -> None:
+    """Study-level counterpart of the widening test: foreign-study rows from a
+    backend that ignores the StudyInstanceUID key must not inflate the counters
+    nor leak into delivery (#21)."""
+    _, ctx = app_client
+    study = seeded_study["study"][0]
+    expected = {sop for s in seeded_study["series"] for sop in seeded_study[s]}
+
+    from pydicom.uid import generate_uid
+
+    from tests.factories import make_instance
+
+    foreign_study, foreign_series = generate_uid(), generate_uid()
+    for _ in range(3):
+        fake_pacs.add_instance(make_instance(foreign_study, foreign_series, generate_uid()))
+    fake_pacs.widen_study_find = True
+
+    recv_port = free_port()
+    recv = _Receiver()
+    recv.start(recv_port, "WORKSTATION")
+    from dicorina.dimse_face.allowlist import Destination
+
+    ctx["app"].state.dimse._allowlist._dests["WORKSTATION"] = Destination("127.0.0.1", recv_port)
+
+    def _run_scu() -> list:
+        from pydicom.dataset import Dataset
+
+        ae = AE(ae_title="WORKSTATION")
+        ae.add_requested_context(StudyRootQueryRetrieveInformationModelMove)
+        assoc = ae.associate("127.0.0.1", ctx["cfg"].dimse.listen_port, ae_title=ctx["face_aet"])
+        assert assoc.is_established
+
+        query = Dataset()
+        query.QueryRetrieveLevel = "STUDY"
+        query.StudyInstanceUID = study
+        statuses = list(
+            assoc.send_c_move(query, "WORKSTATION", StudyRootQueryRetrieveInformationModelMove)
+        )
+        assoc.release()
+
+        deadline = time.time() + 15
+        while len(recv.received) < len(expected) and time.time() < deadline:
+            time.sleep(0.2)
+        return statuses
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="dicorina.dimse_face.face"):
+            statuses = await asyncio.to_thread(_run_scu)
+        pending = [s for s, _ in statuses if s is not None and s.Status == 0xFF00]
+        assert pending, "expected at least one pending C-MOVE-RSP"
+        for s in pending:
+            total = (
+                getattr(s, "NumberOfRemainingSuboperations", 0)
+                + getattr(s, "NumberOfCompletedSuboperations", 0)
+                + getattr(s, "NumberOfFailedSuboperations", 0)
+                + getattr(s, "NumberOfWarningSuboperations", 0)
+            )
+            assert total == len(expected)
+        assert "StudyInstanceUID matching key" in caplog.text
+        assert any(s.Status == 0x0000 for s, _ in statuses if s is not None)
+        assert set(recv.received) == expected
+    finally:
+        recv.stop()

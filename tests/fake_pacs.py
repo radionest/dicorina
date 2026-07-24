@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from copy import deepcopy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -33,6 +34,10 @@ class FakePacs:
         self.find_response_delay: float = 0.0
         self.fail_find_with: int | None = None
         self.fail_find_after: int = 0  # pending results to yield before failing
+        # Emulate a backend that ignores SeriesInstanceUID as a matching key at
+        # series level (C-FIND only; C-MOVE delivery stays faithful) -- issue #21.
+        self.widen_series_find: bool = False
+        self.widen_study_find: bool = False  # same, for the StudyInstanceUID key
         self.active_associations = 0
         self._assoc_lock = threading.Lock()
 
@@ -108,7 +113,14 @@ class FakePacs:
         if self.fail_find_with is not None and self.fail_find_after == 0:
             yield (self.fail_find_with, None)
             return
-        matches = self._match(identifier)
+        match_ident = identifier
+        if level == "SERIES" and (self.widen_series_find or self.widen_study_find):
+            match_ident = deepcopy(identifier)
+            if self.widen_series_find and "SeriesInstanceUID" in match_ident:
+                del match_ident.SeriesInstanceUID
+            if self.widen_study_find and "StudyInstanceUID" in match_ident:
+                del match_ident.StudyInstanceUID
+        matches = self._match(match_ident)
 
         seen: set[str] = set()
         emitted = 0
