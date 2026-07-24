@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import TYPE_CHECKING, Any
 
@@ -19,8 +20,11 @@ from dimsechord import (
     AssociationError,
     FindFailedError,
     MoveToSelfError,
+    NoPresentationContextError,
     PoolExhaustedError,
     SeriesQuery,
+    StoreSession,
+    build_storage_scp_contexts,
     build_storage_scu_contexts,
 )
 from pynetdicom import AE, evt
@@ -44,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 def _build_ae(aet: str) -> AE:
-    """Face AE: QR/Echo SCP contexts + storage SCU contexts for C-MOVE forwarding.
+    """Face AE: QR/Echo + storage SCP contexts, plus storage SCU contexts for C-MOVE forwarding.
 
     Requested contexts come from dimsechord's builder: one uncompressed context
     per storage class plus one context per (image class x compressed TS), so the
@@ -61,6 +65,8 @@ def _build_ae(aet: str) -> AE:
         StudyRootQueryRetrieveInformationModelMove,
     ):
         ae.add_supported_context(cx)
+    for cx in build_storage_scp_contexts():
+        ae.add_supported_context(cx.abstract_syntax, cx.transfer_syntax)  # type: ignore[arg-type]
     ae.requested_contexts = build_storage_scu_contexts()
     return ae
 
@@ -78,6 +84,8 @@ class DimseFace:
         *,
         cfind_timeout: float = 30.0,
         cmove_count_timeout: float = 30.0,
+        store_aet: str = "",
+        store_timeout: float = 30.0,
     ) -> None:
         self._engine = engine
         self._client = client
@@ -88,6 +96,10 @@ class DimseFace:
         self._aet = aet
         self._cfind_timeout = cfind_timeout
         self._cmove_count_timeout = cmove_count_timeout
+        self._store_aet = store_aet or aet
+        self._store_timeout = store_timeout
+        self._store_sessions: dict[Any, StoreSession] = {}
+        self._store_lock = threading.Lock()
         self._server: Any | None = None
         self._warned_keys: set[str] = set()
 
@@ -105,6 +117,10 @@ class DimseFace:
             (evt.EVT_C_ECHO, self._on_echo),
             (evt.EVT_C_FIND, self._on_find),
             (evt.EVT_C_MOVE, self._on_move),  # implemented in Task 8
+            (evt.EVT_C_STORE, self._on_store),
+            (evt.EVT_RELEASED, self._on_assoc_end),
+            (evt.EVT_ABORTED, self._on_assoc_end),
+            (evt.EVT_CONN_CLOSE, self._on_assoc_end),
         ]
         self._server = ae.start_server((ip, port), block=False, evt_handlers=handlers)
         logger.info("DIMSE face listening on %s:%s (AET: %s)", ip, port, self._aet)
@@ -114,11 +130,66 @@ class DimseFace:
             self._server.shutdown()
             self._server = None
             logger.info("DIMSE face stopped")
+        with self._store_lock:
+            sessions = list(self._store_sessions.values())
+            self._store_sessions.clear()
+        for session in sessions:
+            session.close()
 
     # ── handlers ──────────────────────────────────────────────────
     @staticmethod
     def _on_echo(event: evt.Event) -> int:  # noqa: ARG004
         return 0x0000
+
+    def _on_store(self, event: evt.Event) -> int:
+        """Relay one instance to the PACS; the response status is the PACS's own.
+
+        Runs in the pynetdicom worker thread — same no-event-loop-hop design as
+        C-FIND. One StoreSession per inbound association, created on its first
+        C-STORE; DIMSE serializes events per association, so the session is
+        never entered concurrently.
+        """
+        ds = event.dataset
+        ds.file_meta = event.file_meta
+        with self._store_lock:
+            session = self._store_sessions.get(event.assoc)
+            if session is None:
+                session = StoreSession(
+                    self._pacs,
+                    calling_aet=self._store_aet,
+                    timeout=self._store_timeout,
+                )
+                self._store_sessions[event.assoc] = session
+        sop = str(getattr(ds, "SOPInstanceUID", "") or "")
+        try:
+            return session.store(ds)
+        except NoPresentationContextError as e:
+            self._warn_once(
+                f"store-ctx:{e.sop_class_uid}:{e.transfer_syntax}",
+                "C-STORE relay refused: no upstream context for SOP class %s "
+                "with transfer syntax %s (sop=%s)",
+                e.sop_class_uid,
+                e.transfer_syntax,
+                sop or "-",
+            )
+            return 0x0122  # SOP class not supported
+        except AssociationError as e:
+            logger.error("C-STORE relay failed [%s] (sop=%s): %s", type(e).__name__, sop or "-", e)
+            return 0xA700  # Out of resources
+        except Exception:
+            logger.exception("C-STORE relay failed (sop=%s)", sop or "-")
+            return 0xC000
+
+    def _on_assoc_end(self, event: evt.Event) -> None:
+        """Close the store session when its inbound association ends.
+
+        Registered for RELEASED, ABORTED and CONN_CLOSE — more than one can fire
+        for the same association; pop makes the close idempotent.
+        """
+        with self._store_lock:
+            session = self._store_sessions.pop(event.assoc, None)
+        if session is not None:
+            session.close()
 
     def _run(self, coro: Any) -> Any:
         """Run an async DicomClient call from this pynetdicom worker thread."""
