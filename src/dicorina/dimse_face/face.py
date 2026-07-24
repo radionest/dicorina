@@ -146,11 +146,11 @@ class DimseFace:
 
         Runs in the pynetdicom worker thread — same no-event-loop-hop design as
         C-FIND. One StoreSession per inbound association, created on its first
-        C-STORE; DIMSE serializes events per association, so the session is
-        never entered concurrently.
+        C-STORE; DIMSE serializes store-vs-store events per association, so the
+        session is never entered concurrently by two stores. EVT_CONN_CLOSE fires
+        on the DUL thread instead and can race this handler — the ``finally``
+        block below is the guard for that.
         """
-        ds = event.dataset
-        ds.file_meta = event.file_meta
         with self._store_lock:
             session = self._store_sessions.get(event.assoc)
             if session is None:
@@ -160,8 +160,11 @@ class DimseFace:
                     timeout=self._store_timeout,
                 )
                 self._store_sessions[event.assoc] = session
-        sop = str(getattr(ds, "SOPInstanceUID", "") or "")
+        sop = ""
         try:
+            ds = event.dataset
+            ds.file_meta = event.file_meta
+            sop = str(getattr(ds, "SOPInstanceUID", "") or "")
             return session.store(ds)
         except NoPresentationContextError as e:
             self._warn_once(
@@ -179,6 +182,17 @@ class DimseFace:
         except Exception:
             logger.exception("C-STORE relay failed (sop=%s)", sop or "-")
             return 0xC000
+        finally:
+            # EVT_CONN_CLOSE runs on the DUL thread and can race this handler:
+            # its close() can land mid-store and StoreSession's provably-unsent
+            # retry then reopens an association nobody owns. Re-check after the
+            # store: if the inbound association died, this thread is the last
+            # one out — drop the registry entry and close (idempotent).
+            if not event.assoc.is_established:
+                with self._store_lock:
+                    if self._store_sessions.get(event.assoc) is session:
+                        del self._store_sessions[event.assoc]
+                session.close()
 
     def _on_assoc_end(self, event: evt.Event) -> None:
         """Close the store session when its inbound association ends.
