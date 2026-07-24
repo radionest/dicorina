@@ -128,15 +128,31 @@ class DimseFace:
         logger.info("DIMSE face listening on %s:%s (AET: %s)", ip, port, self._aet)
 
     def stop(self) -> None:
+        """Stop the DIMSE face and close idle store sessions.
+
+        ``ThreadedAssociationServer.shutdown()`` closes the listening socket
+        but never joins the per-association threads, so a store can still be
+        in flight on its own thread when this runs. Idle sessions close right
+        away; in-flight ones are doomed instead — same deferral as
+        ``_on_assoc_end`` — so close() never races the store it belongs to.
+        """
         if self._server is not None:
             self._server.shutdown()
             self._server = None
             logger.info("DIMSE face stopped")
         with self._store_lock:
-            sessions = list(self._store_sessions.values())
-            self._store_sessions.clear()
-            self._store_doomed.clear()
-        for session in sessions:
+            idle = [
+                (assoc, session)
+                for assoc, session in self._store_sessions.items()
+                if assoc not in self._store_inflight
+            ]
+            for assoc, _ in idle:
+                del self._store_sessions[assoc]
+            # In-flight stores own their sessions: doom them and let each
+            # store's finally do the close once store() returns (same
+            # mutual-exclusion rule as _on_assoc_end).
+            self._store_doomed.update(self._store_sessions.keys())
+        for _, session in idle:
             session.close()
 
     # ── handlers ──────────────────────────────────────────────────

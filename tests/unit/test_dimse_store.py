@@ -176,3 +176,28 @@ def test_conn_close_during_store_defers_cleanup(monkeypatch) -> None:
 
     face._on_store(_store_event(a))
     assert len(_FakeSession.instances) == 2  # registry entry was dropped -> fresh session
+
+
+def test_stop_during_inflight_store_defers_close(monkeypatch) -> None:
+    # ThreadedAssociationServer.shutdown() never joins the per-association
+    # thread, so stop() can run while a store is still in flight on that
+    # thread. Model that interleaving deterministically: the fake session's
+    # store() itself calls face.stop() mid-call. The session must NOT be
+    # closed at that point (the in-flight marker defers it) — only once
+    # _on_store's own finally runs, after store() has actually returned.
+    face = _face()
+    a = object()
+    closed_during_store: list[bool] = []
+
+    class _RacingSession(_FakeSession):
+        def store(self, dataset: Any) -> int:
+            face.stop()
+            closed_during_store.append(self.closed)
+            return super().store(dataset)
+
+    monkeypatch.setattr(face_mod, "StoreSession", _RacingSession)
+
+    assert face._on_store(_store_event(a)) == 0x0000
+    assert closed_during_store == [False]  # not closed while store() was still running
+    assert _FakeSession.instances[0].closed  # closed once _on_store's finally ran
+    assert face._store_sessions == {}  # registry entry dropped, not left dangling
