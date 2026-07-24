@@ -99,6 +99,8 @@ class DimseFace:
         self._store_aet = store_aet or aet
         self._store_timeout = store_timeout
         self._store_sessions: dict[Any, StoreSession] = {}
+        self._store_inflight: set[Any] = set()
+        self._store_doomed: set[Any] = set()
         self._store_lock = threading.Lock()
         self._server: Any | None = None
         self._warned_keys: set[str] = set()
@@ -133,6 +135,7 @@ class DimseFace:
         with self._store_lock:
             sessions = list(self._store_sessions.values())
             self._store_sessions.clear()
+            self._store_doomed.clear()
         for session in sessions:
             session.close()
 
@@ -146,20 +149,26 @@ class DimseFace:
 
         Runs in the pynetdicom worker thread — same no-event-loop-hop design as
         C-FIND. One StoreSession per inbound association, created on its first
-        C-STORE; DIMSE serializes store-vs-store events per association, so the
-        session is never entered concurrently by two stores. EVT_CONN_CLOSE fires
-        on the DUL thread instead and can race this handler — the ``finally``
-        block below is the guard for that.
+        C-STORE. EVT_CONN_CLOSE fires on pynetdicom's DUL thread and can land
+        mid-store, concurrently with this handler; cleanup therefore defers via
+        a "doomed" marker (see ``_on_assoc_end``) consumed in the ``finally``
+        below, so ``close()`` never runs while ``store()`` is still in flight
+        (StoreSession's one-thread-at-a-time contract holds). CONN_CLOSE landing
+        before the first store needs nothing extra: pynetdicom queues an
+        A-P-ABORT and the late EVT_ABORTED — on the reactor thread, after this
+        handler has already returned — pops the entry then.
         """
+        assoc = event.assoc
         with self._store_lock:
-            session = self._store_sessions.get(event.assoc)
+            session = self._store_sessions.get(assoc)
             if session is None:
                 session = StoreSession(
                     self._pacs,
                     calling_aet=self._store_aet,
                     timeout=self._store_timeout,
                 )
-                self._store_sessions[event.assoc] = session
+                self._store_sessions[assoc] = session
+            self._store_inflight.add(assoc)
         sop = ""
         try:
             ds = event.dataset
@@ -183,24 +192,30 @@ class DimseFace:
             logger.exception("C-STORE relay failed (sop=%s)", sop or "-")
             return 0xC000
         finally:
-            # EVT_CONN_CLOSE runs on the DUL thread and can race this handler:
-            # its close() can land mid-store and StoreSession's provably-unsent
-            # retry then reopens an association nobody owns. Re-check after the
-            # store: if the inbound association died, this thread is the last
-            # one out — drop the registry entry and close (idempotent).
-            if not event.assoc.is_established:
-                with self._store_lock:
-                    if self._store_sessions.get(event.assoc) is session:
-                        del self._store_sessions[event.assoc]
+            with self._store_lock:
+                self._store_inflight.discard(assoc)
+                doomed = assoc in self._store_doomed
+                if doomed:
+                    self._store_doomed.discard(assoc)
+                    if self._store_sessions.get(assoc) is session:
+                        del self._store_sessions[assoc]
+            if doomed:
                 session.close()
 
     def _on_assoc_end(self, event: evt.Event) -> None:
         """Close the store session when its inbound association ends.
 
         Registered for RELEASED, ABORTED and CONN_CLOSE — more than one can fire
-        for the same association; pop makes the close idempotent.
+        for the same association; pop makes the close idempotent. CONN_CLOSE runs
+        on the DUL thread and can land while ``_on_store`` is still mid-store for
+        this same association (a different thread) — in that case, defer: mark
+        the association doomed and let ``_on_store``'s own ``finally`` pop and
+        close once ``store()`` has returned, so the two never race.
         """
         with self._store_lock:
+            if event.assoc in self._store_inflight:
+                self._store_doomed.add(event.assoc)
+                return
             session = self._store_sessions.pop(event.assoc, None)
         if session is not None:
             session.close()
