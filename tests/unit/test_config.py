@@ -145,3 +145,24 @@ def test_dimse_aet_and_find_cap_from_toml(tmp_path) -> None:
     assert cfg.dimse.aet == "FACE1"
     assert cfg.pool.per_aet_find_cap == 2
     assert cfg.timeouts.find_lease == 0.5
+
+
+def test_store_config_defaults(tmp_path) -> None:
+    cfg = DicorinaConfig.model_validate(
+        {"pacs": {"host": "10.0.0.1"}, "scp": {}, "cache": {"dir": str(tmp_path)}}
+    )
+    assert cfg.timeouts.store == 30.0
+    assert cfg.pacs.store_aet == ""
+
+
+def test_store_config_overrides(tmp_path) -> None:
+    cfg = DicorinaConfig.model_validate(
+        {
+            "pacs": {"host": "10.0.0.1", "store_aet": "DICSTORE"},
+            "scp": {},
+            "cache": {"dir": str(tmp_path)},
+            "timeouts": {"store": 5.0},
+        }
+    )
+    assert cfg.timeouts.store == 5.0
+    assert cfg.pacs.store_aet == "DICSTORE"
