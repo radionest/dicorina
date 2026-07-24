@@ -104,12 +104,12 @@ def test_s7_eviction():
     assert va.check_s7({"studies_before_evict": 0, "studies_after_evict": 0})
 
 
-def _s8_results(ok=True, count=50, study="1.2.3", extra_study=None):
+def _s8_results(ok=True, count=50, study="1.2.3", extra_study=None, events=None):
     clienta = {"events": [{"kind": "store_relay", "ok": ok, "statuses": []}]}
     received = {study: {"count": count}}
     if extra_study:
         received[extra_study] = {"count": 1}
-    clientb = {"received": {"s8": received}, "events": []}
+    clientb = {"received": {"s8": received}, "events": events or []}
     return clienta, clientb
 
 
@@ -131,6 +131,11 @@ def test_check_s8_short_retrieve():
 def test_check_s8_cross_contamination():
     clienta, clientb = _s8_results(extra_study="9.9.9")
     assert any("cross-contamination" in f for f in va.check_s8(clienta, clientb, "1.2.3", 50))
+
+
+def test_check_s8_drain_timeout():
+    clienta, clientb = _s8_results(events=[{"kind": "drain", "phase": "s8", "ok": False}])
+    assert any("drain timed out" in f for f in va.check_s8(clienta, clientb, "1.2.3", 50))
 
 
 def test_load_results_tolerates_bad_sidecar(tmp_path):
