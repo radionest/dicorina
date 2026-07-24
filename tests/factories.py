@@ -47,3 +47,20 @@ def make_instance(
     ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
     ds.file_meta.ImplementationClassUID = generate_uid()
     return ds
+
+
+def make_compressed_instance(study_uid: str, series_uid: str, sop_uid: str) -> Dataset:
+    """MR instance flagged JPEG-LS: encapsulated PixelData, compressed file_meta TS.
+
+    The pixel bytes are not real JPEG-LS — transport tests only negotiate and
+    relay them, nothing decodes.
+    """
+    from pydicom.encaps import encapsulate
+    from pydicom.uid import JPEGLSLossless
+
+    ds = make_instance(study_uid, series_uid, sop_uid)
+    ds.PixelData = encapsulate([bytes(ds.Rows * ds.Columns)])
+    ds["PixelData"].is_undefined_length = True
+    ds["PixelData"].VR = "OB"
+    ds.file_meta.TransferSyntaxUID = JPEGLSLossless
+    return ds
