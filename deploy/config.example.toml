@@ -11,7 +11,10 @@ port = 104
 aet = "HOSPITALPACS"
 # Calling AE Title dicorina presents to the PACS for C-STORE relays.
 # Empty: reuse dimse.aet. The PACS must accept C-STORE associations from
-# this AET (register it on the PACS side).
+# this AET (register it on the PACS side). Store sessions bypass the pool's
+# per-AE caps, so use a dedicated AET (or the dimse.aet default) — never a
+# [[pool.members]] AET, or stores will erode the read path's PACS-side
+# association budget.
 store_aet = ""
 
 # Connection pool: one AE Title per listener, each on its own C-STORE port.
