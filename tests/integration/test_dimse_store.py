@@ -127,7 +127,17 @@ async def test_find_only_association_opens_no_store_session(app_client, fake_pac
 async def test_store_session_closes_on_release(app_client, fake_pacs) -> None:
     _, ctx = app_client
     before = fake_pacs.active_associations
-    await asyncio.to_thread(_store, ctx, _new_instances(1))  # _store releases
+
+    def _store_then_release() -> None:
+        ae = AE(ae_title="WORKSTATION")
+        ae.add_requested_context(MRImageStorage)
+        assoc = ae.associate("127.0.0.1", _dimse_port(ctx), ae_title=ctx["face_aet"])
+        assert assoc.is_established
+        assoc.send_c_store(_new_instances(1)[0])
+        assert _wait_until(lambda: fake_pacs.active_associations > before)
+        assoc.release()
+
+    await asyncio.to_thread(_store_then_release)
     assert _wait_until(lambda: fake_pacs.active_associations == before)
 
 
@@ -142,6 +152,7 @@ async def test_store_session_closes_on_abort(app_client, fake_pacs) -> None:
         assoc = ae.associate("127.0.0.1", _dimse_port(ctx), ae_title=ctx["face_aet"])
         assert assoc.is_established
         assoc.send_c_store(_new_instances(1)[0])
+        assert _wait_until(lambda: fake_pacs.active_associations > before)
         assoc.abort()
 
     await asyncio.to_thread(_store_then_abort)
@@ -199,10 +210,15 @@ async def test_store_survives_upstream_restart(app_client, fake_pacs) -> None:
 
 
 @pytest.mark.asyncio
-async def test_concurrent_stores_bypass_pool_cap(app_client, fake_pacs) -> None:  # noqa: ARG001
-    # per_aet_cap=1 in the app_client config: if store sessions leased from the
-    # pool, two concurrent storing clients could not both proceed.
+async def test_concurrent_stores_bypass_pool_cap(app_client, fake_pacs) -> None:
+    # per_aet_cap=1 in the app_client config: each store session opens its own
+    # upstream association instead of leasing one from the pool. Proof: two
+    # upstream store associations are open at once (impossible if either
+    # store instead waited on a cap-1 pool lease); both clients still
+    # complete all 3 stores.
     _, ctx = app_client
+    before = fake_pacs.active_associations
+    fake_pacs.store_response_delay = 0.3  # widen the overlap window
     results: list[list[int]] = [[], []]
     gate = threading.Barrier(2)
 
@@ -213,6 +229,9 @@ async def test_concurrent_stores_bypass_pool_cap(app_client, fake_pacs) -> None:
     t1 = threading.Thread(target=_one, args=(0,))
     t2 = threading.Thread(target=_one, args=(1,))
     t1.start(), t2.start()
+    assert await asyncio.to_thread(
+        _wait_until, lambda: fake_pacs.active_associations >= before + 2, 10.0
+    )
     await asyncio.to_thread(t1.join)
     await asyncio.to_thread(t2.join)
     assert results[0] == [0x0000] * 3
