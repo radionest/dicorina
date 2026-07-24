@@ -1,4 +1,4 @@
-"""SCU client agent: Storage SCP + scripted HTTP/DIMSE scenarios S0-S7.
+"""SCU client agent: Storage SCP + scripted HTTP/DIMSE scenarios S0-S8.
 
 Driven entirely by env (see plan Task 8 interfaces). Records every observation
 via agent_core and writes RESULT_PATH; coordinates concurrent phases through

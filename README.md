@@ -50,7 +50,7 @@ The HTTP API (`/dicom-web/*`) ships open by default (`auth_token = ""`). The HTT
 install.sh+systemd, two clients). Build goldens once, then run:
 
     bash staging/vm-net/build-golden.sh   # cached; FORCE_REBUILD=pacs|client|all
-    bash staging/vm-net/run.sh            # boots all 4, asserts S0-S7 on the host
+    bash staging/vm-net/run.sh            # boots all 4, asserts S0-S8 on the host
 
 Env: `WORK=<disk dir>` (default /tmp/dicorina-vm-net), `INSTANCES_PER_STUDY` (default 50),
 `TIMEOUT`. Needs /dev/kvm + uv. Pure-module units run in the normal suite (`uv run pytest`).
