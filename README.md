@@ -22,7 +22,7 @@ Production deps are **intentionally not pinned**: `pip install .` resolves the v
 
 The unit runs the `dicorina` console script, which reads `DICORINA_CONFIG` and binds uvicorn to
 `http.bind_host`/`http.bind_port` from the config. One process, two listeners: uvicorn serves
-HTTP on the configured port; the pynetdicom DIMSE AE (C-FIND/C-MOVE/C-ECHO) binds
+HTTP on the configured port; the pynetdicom DIMSE AE (C-FIND/C-MOVE/C-STORE/C-ECHO) binds
 `dimse.listen_ip`/`dimse.listen_port` inside the lifespan; eviction and the healthcheck run as
 in-process asyncio tasks.
 
@@ -34,9 +34,15 @@ Restrict access with a host-level IP-allowlist, for example:
 ufw allow from <PACS_IP> to any port <dimse.listen_port>
 ```
 
+**C-STORE relay:** clients can C-STORE to the DIMSE face; each instance is
+forwarded 1:1 to the PACS and the PACS's status is returned verbatim (no queue —
+if the PACS is down, the client's store fails and the client retries). The PACS
+must accept C-STORE associations from `pacs.store_aet` (default: `dimse.aet`) —
+register that AET on the PACS before enabling clients.
+
 ## Auth
 
-The HTTP API (`/dicom-web/*`) ships open by default (`auth_token = ""`). The HTTP face binds `127.0.0.1` and sits behind Clarinet's nginx reverse proxy (same-origin OHIF). To enforce token authentication, set `DICORINA_AUTH_TOKEN` environment variable or configure `[http] auth_token` in config. When enabled, requests must include either `Authorization: Bearer <token>` or `X-Internal-Token: <token>` header; both use constant-time comparison. Browsers cannot add custom headers, so when authentication is enforced, nginx must inject `X-Internal-Token` on proxied `/dicom-web/` requests (or upgrade to nginx `auth_request` + Clarinet `/api/auth/me`). The DIMSE face (C-MOVE/C-GET/C-FIND) is always protected independently by firewall IP-allowlist, called-AET check, and AET allowlist, regardless of HTTP token setting.
+The HTTP API (`/dicom-web/*`) ships open by default (`auth_token = ""`). The HTTP face binds `127.0.0.1` and sits behind Clarinet's nginx reverse proxy (same-origin OHIF). To enforce token authentication, set `DICORINA_AUTH_TOKEN` environment variable or configure `[http] auth_token` in config. When enabled, requests must include either `Authorization: Bearer <token>` or `X-Internal-Token: <token>` header; both use constant-time comparison. Browsers cannot add custom headers, so when authentication is enforced, nginx must inject `X-Internal-Token` on proxied `/dicom-web/` requests (or upgrade to nginx `auth_request` + Clarinet `/api/auth/me`). The DIMSE face (C-MOVE/C-FIND/C-STORE) is always protected independently by the host firewall IP-allowlist and the called-AET check, regardless of HTTP token setting; the `[dimse.allowlist]` table additionally restricts C-MOVE *destinations* only — inbound callers (including C-STORE writers) are not authorized by AET, so size the DIMSE-port firewall for every storage client, not just the PACS.
 
 ## E2E (multi-VM)
 
@@ -44,7 +50,7 @@ The HTTP API (`/dicom-web/*`) ships open by default (`auth_token = ""`). The HTT
 install.sh+systemd, two clients). Build goldens once, then run:
 
     bash staging/vm-net/build-golden.sh   # cached; FORCE_REBUILD=pacs|client|all
-    bash staging/vm-net/run.sh            # boots all 4, asserts S0-S7 on the host
+    bash staging/vm-net/run.sh            # boots all 4, asserts S0-S8 on the host
 
 Env: `WORK=<disk dir>` (default /tmp/dicorina-vm-net), `INSTANCES_PER_STUDY` (default 50),
 `TIMEOUT`. Needs /dev/kvm + uv. Pure-module units run in the normal suite (`uv run pytest`).

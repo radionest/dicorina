@@ -15,6 +15,7 @@ DATA = os.environ.get("VMNET_DATA", "staging/.data/vm-net")
 N = int(os.environ.get("INSTANCES_PER_STUDY", "50"))
 PLAN = study_plan.build_study_plan(int(os.environ.get("STUDIES", "6")), N)
 SUID = [s["StudyInstanceUID"] for s in PLAN]  # SUID[0]=study1 .. SUID[5]=study6
+SUID7 = study_plan.build_study_plan(7, N)[6]["StudyInstanceUID"]
 
 
 @pytest.fixture(scope="session")
@@ -63,3 +64,7 @@ def test_s6_cross_face_cache_hit(results):
 
 def test_s7_eviction(results):
     assert va.check_s7(results["proxy"]) == []
+
+
+def test_s8_store_relay(results):
+    assert va.check_s8(results["clienta"], results["clientb"], SUID7, N) == []

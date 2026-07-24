@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 from pydicom import Dataset
-from pynetdicom import AE, StoragePresentationContexts, evt
+from pynetdicom import AE, ALL_TRANSFER_SYNTAXES, StoragePresentationContexts, evt
 from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     PatientRootQueryRetrieveInformationModelFind,
     PatientRootQueryRetrieveInformationModelMove,
@@ -38,6 +38,13 @@ class FakePacs:
         # series level (C-FIND only; C-MOVE delivery stays faithful) -- issue #21.
         self.widen_series_find: bool = False
         self.widen_study_find: bool = False  # same, for the StudyInstanceUID key
+        self.store_status: int = 0x0000
+        self.store_response_delay: float = 0.0
+        self.store_compressed: bool = False  # set BEFORE start(); needs restart to change
+        self.stored: list[Dataset] = []
+        self.store_calling_aets: list[str] = []
+        self.store_transfer_syntaxes: list[str] = []
+        self.established_aets: list[str] = []
         self.active_associations = 0
         self._assoc_lock = threading.Lock()
 
@@ -60,12 +67,16 @@ class FakePacs:
         # C-MOVE SCP also acts as a C-STORE SCU toward the destination.
         for cx in StoragePresentationContexts:
             if cx.abstract_syntax is not None:
-                ae.add_supported_context(cx.abstract_syntax)
+                if self.store_compressed:
+                    ae.add_supported_context(cx.abstract_syntax, ALL_TRANSFER_SYNTAXES)
+                else:
+                    ae.add_supported_context(cx.abstract_syntax)
                 ae.add_requested_context(cx.abstract_syntax)
         handlers = [
             (evt.EVT_C_FIND, self._on_find),
             (evt.EVT_C_MOVE, self._on_move),
             (evt.EVT_C_ECHO, self._on_echo),
+            (evt.EVT_C_STORE, self._on_store),
             (evt.EVT_ESTABLISHED, self._on_established),
             (evt.EVT_RELEASED, self._on_closed),
             (evt.EVT_ABORTED, self._on_closed),
@@ -82,13 +93,32 @@ class FakePacs:
     def _on_echo(event: evt.Event) -> int:  # noqa: ARG004
         return 0x0000
 
-    def _on_established(self, event: evt.Event) -> None:  # noqa: ARG002
+    def _on_established(self, event: evt.Event) -> None:
         with self._assoc_lock:
             self.active_associations += 1
+            self.established_aets.append(self._aet(event))
 
     def _on_closed(self, event: evt.Event) -> None:  # noqa: ARG002
         with self._assoc_lock:
             self.active_associations -= 1
+
+    @staticmethod
+    def _aet(event: evt.Event) -> str:
+        calling = event.assoc.requestor.ae_title
+        if hasattr(calling, "decode"):
+            calling = calling.decode()
+        return str(calling).strip()
+
+    def _on_store(self, event: evt.Event) -> int:
+        ds = event.dataset
+        ds.file_meta = event.file_meta
+        with self._assoc_lock:
+            self.stored.append(ds)
+            self.store_calling_aets.append(self._aet(event))
+            self.store_transfer_syntaxes.append(str(event.context.transfer_syntax))
+        if self.store_response_delay:
+            time.sleep(self.store_response_delay)
+        return self.store_status
 
     def _match(self, identifier: Dataset) -> list[Dataset]:
         study = str(getattr(identifier, "StudyInstanceUID", "") or "")

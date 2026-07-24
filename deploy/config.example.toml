@@ -9,6 +9,13 @@ host = "10.0.0.10"
 port = 104
 # AE Title of the PACS server
 aet = "HOSPITALPACS"
+# Calling AE Title dicorina presents to the PACS for C-STORE relays.
+# Empty: reuse dimse.aet. The PACS must accept C-STORE associations from
+# this AET (register it on the PACS side). Store sessions bypass the pool's
+# per-AE caps, so use a dedicated AET (or the dimse.aet default) — never a
+# [[pool.members]] AET, or stores will erode the read path's PACS-side
+# association budget.
+store_aet = ""
 
 # Connection pool: one AE Title per listener, each on its own C-STORE port.
 # The upstream PACS MUST register each AET as a modality pointing at the matching
@@ -92,6 +99,10 @@ arrival = 60.0
 completion_grace = 5.0
 # Max wait for a free per-AET C-FIND slot before failing (HTTP 503 / DIMSE 0xA700)
 find_lease = 30.0
+# Per-instance C-STORE relay timeout in seconds (upstream ACSE + DIMSE).
+# Keep conservative: a non-responsive PACS holds the inbound association's
+# worker thread for up to this long per instance before the client gets 0xA700.
+store = 30.0
 
 # Health check configuration
 [healthcheck]

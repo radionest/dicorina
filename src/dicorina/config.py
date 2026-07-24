@@ -13,6 +13,7 @@ class PacsConfig(BaseModel):
     host: str
     port: int = 104
     aet: str = "PACS"
+    store_aet: str = ""
 
 
 class AetPoolMember(BaseModel):
@@ -78,6 +79,7 @@ class TimeoutsConfig(BaseModel):
     arrival: float = 60.0
     completion_grace: float = 5.0
     find_lease: float = 30.0
+    store: float = 30.0
 
 
 class HealthcheckConfig(BaseModel):

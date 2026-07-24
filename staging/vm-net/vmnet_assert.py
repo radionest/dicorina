@@ -150,3 +150,17 @@ def check_s7(proxy):
     if not before > after:
         fails.append(f"S7: eviction did not reduce study count ({before} -> {after})")
     return fails
+
+
+def check_s8(clienta, clientb, study, n):
+    fails = []
+    e = event(clienta, "store_relay")
+    if e is None or not e.get("ok"):
+        fails.append(f"S8: clienta store relay failed ({e!r})")
+    if received_count(clientb, "s8", study) != n:
+        fails.append(f"S8: clientb got {received_count(clientb, 's8', study)} of {n} for {study}")
+    if _studies_in(clientb, "s8") != {study}:
+        fails.append(f"S8: cross-contamination {_studies_in(clientb, 's8')}")
+    if _drain_failed(clientb, "s8"):
+        fails.append("S8: drain timed out")
+    return fails
