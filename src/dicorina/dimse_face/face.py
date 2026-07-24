@@ -104,6 +104,7 @@ class DimseFace:
         self._store_lock = threading.Lock()
         self._server: Any | None = None
         self._warned_keys: set[str] = set()
+        self._warn_lock = threading.Lock()
 
     @property
     def is_running(self) -> bool:
@@ -257,12 +258,19 @@ class DimseFace:
             ) from exc
 
     def _warn_once(self, key: str, msg: str, *args: object) -> None:
-        """First occurrence per key logs WARNING; repeats drop to DEBUG (log-spam guard)."""
-        if key in self._warned_keys:
+        """First occurrence per key logs WARNING; repeats drop to DEBUG (log-spam guard).
+
+        Callers run on per-association worker threads; the check-and-add is
+        locked so a key warns exactly once. Logging stays outside the lock.
+        """
+        with self._warn_lock:
+            first = key not in self._warned_keys
+            if first:
+                self._warned_keys.add(key)
+        if first:
+            logger.warning(msg, *args)
+        else:
             logger.debug(msg, *args)
-            return
-        self._warned_keys.add(key)
-        logger.warning(msg, *args)
 
     def _on_find(self, event: evt.Event) -> Iterator[tuple[int, Dataset | None]]:
         ident = event.identifier
