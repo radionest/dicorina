@@ -251,3 +251,4 @@ async def test_compressed_instance_passes_through_verbatim(app_client, fake_pacs
     assert statuses == [0x0000]
     assert fake_pacs.store_transfer_syntaxes == [str(JPEGLSLossless)]
     assert str(fake_pacs.stored[0].SOPInstanceUID) == str(ds.SOPInstanceUID)
+    assert fake_pacs.stored[0].PixelData == ds.PixelData
