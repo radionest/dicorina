@@ -99,7 +99,9 @@ arrival = 60.0
 completion_grace = 5.0
 # Max wait for a free per-AET C-FIND slot before failing (HTTP 503 / DIMSE 0xA700)
 find_lease = 30.0
-# Per-instance C-STORE relay timeout in seconds (upstream ACSE + DIMSE)
+# Per-instance C-STORE relay timeout in seconds (upstream ACSE + DIMSE).
+# Keep conservative: a non-responsive PACS holds the inbound association's
+# worker thread for up to this long per instance before the client gets 0xA700.
 store = 30.0
 
 # Health check configuration
