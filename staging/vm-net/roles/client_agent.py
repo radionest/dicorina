@@ -41,6 +41,7 @@ N = int(os.environ.get("INSTANCES_PER_STUDY", "50"))
 
 PLAN = study_plan.build_study_plan(int(os.environ.get("STUDIES", "6")), N)
 STUDY = {i + 1: s for i, s in enumerate(PLAN)}   # STUDY[1]..STUDY[6], each a plan dict
+STUDY7 = study_plan.build_study_plan(7, N)[6]  # never seeded on the PACS (STUDIES=6)
 result = ac.new_result(ROLE, SELF_AET)
 
 _current_phase = {"name": "idle"}
@@ -166,6 +167,48 @@ def cmove(study_uid, dest_aet):
     return statuses
 
 
+def _make_s8_instance(st, sop_uid, idx):
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+    ds = Dataset()
+    ds.PatientID = "S8"
+    ds.PatientName = "STORE^RELAY"
+    ds.StudyInstanceUID = st["StudyInstanceUID"]
+    ds.SeriesInstanceUID = st["SeriesInstanceUID"]
+    ds.SOPInstanceUID = sop_uid
+    ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.4"  # MR Image Storage
+    ds.Modality = "MR"
+    ds.SeriesNumber = 1
+    ds.InstanceNumber = idx + 1
+    ds.Rows = 4
+    ds.Columns = 4
+    ds.BitsAllocated = 8
+    ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.PixelRepresentation = 0
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.PixelData = bytes(16)
+    ds.file_meta = Dataset()
+    ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID
+    ds.file_meta.MediaStorageSOPInstanceUID = sop_uid
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds.file_meta.ImplementationClassUID = generate_uid()
+    return ds
+
+
+def store_study(st):
+    ae = AE(ae_title=SELF_AET)
+    ae.requested_contexts = StoragePresentationContexts
+    assoc = ae.associate(PROXY_HOST, PROXY_DIMSE, ae_title=PROXY_CALLED_AET)
+    statuses = []
+    if assoc.is_established:
+        for i, sop in enumerate(st["SOPInstanceUIDs"]):
+            status = assoc.send_c_store(_make_s8_instance(st, sop, i))
+            statuses.append(int(status.Status) if status else -1)
+        assoc.release()
+    return statuses
+
+
 def cmove_ghost(study_uid):
     statuses = cmove(study_uid, "GHOST")
     ac.record_event(result, "cmove_ghost", statuses=statuses, refused=(0xA801 in statuses))
@@ -279,6 +322,12 @@ def main():
             cmove(STUDY[6]["StudyInstanceUID"], SELF_AET)
             drain("s6", STUDY[6]["StudyInstanceUID"], N)
             ac.barrier_signal(BARRIER_DIR, "a_s6_warm")
+            statuses = store_study(STUDY7)
+            ac.record_event(
+                result, "store_relay", statuses=statuses,
+                ok=(len(statuses) == N and all(s == 0 for s in statuses)),
+            )
+            ac.barrier_signal(BARRIER_DIR, "a_s8_stored")
         else:  # clientb
             qido_list()
             qido_chunked_probe()
@@ -290,6 +339,10 @@ def main():
             drain("s5", STUDY[5]["StudyInstanceUID"], N)
             ac.barrier_wait_all(BARRIER_DIR, ["a_s6_warm"], timeout=600)
             wado(6, "wado_cached")
+            ac.barrier_wait_all(BARRIER_DIR, ["a_s8_stored"], timeout=900)
+            _current_phase["name"] = "s8"
+            cmove(STUDY7["StudyInstanceUID"], SELF_AET)
+            drain("s8", STUDY7["StudyInstanceUID"], N)
         time.sleep(5)
     finally:
         # shutdown SCP first: stops _on_store mutations so result dict is stable for json.dump
