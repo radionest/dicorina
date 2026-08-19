@@ -50,13 +50,20 @@ leaves the root logger without one — everything below WARNING from `dicorina`,
 (see `deploy/config.example.toml`) or overridden with `DICORINA_LOG_LEVEL` /
 `DICORINA_PYNETDICOM_LOG_LEVEL`.
 
+Leave `pynetdicom_level` at `WARNING` on a busy proxy. pynetdicom's default
+`LOG_HANDLER_LEVEL="standard"` binds per-DIMSE-message handlers, so INFO costs
+about three lines per relayed instance — thousands per study, written
+synchronously to the journal by every association thread. Refused associations
+do not need it: dicorina logs those itself at WARNING with the decoded reason.
+
 **Reading a load incident.** The DIMSE face logs one line when an association
 is accepted, rejected or ends, and one per finished C-FIND/C-MOVE — at WARNING
 once it exceeds `slow_operation_seconds`, because a slow operation holds both
 its SCP worker thread and its association slot for its whole duration. On top
 of that a snapshot line lands every `snapshot_interval_seconds`:
 
-    load: dimse_assoc=7/10 store_sessions=3 ops[find=2(peak 5) store=1(peak 8)]
+    load: dimse_assoc=7/10 store_sessions=3
+    ops[find=2(peak 5, oldest 12s) store=1(peak 8, oldest 0s)]
     threads=48 executor=0/32 loop_lag_ms=4
 
 - `dimse_assoc=live/max` — inbound associations against pynetdicom's
@@ -64,7 +71,11 @@ of that a snapshot line lands every `snapshot_interval_seconds`:
   further request with an A-ASSOCIATE-RJ *above* dicorina's handlers; clients
   see a rejected or timed-out connect. The snapshot escalates to WARNING here,
   and each refusal is logged with its decoded reason.
-- `ops[...]` — DIMSE handlers in flight, with the peak since start. Compare
+- `ops[...]` — DIMSE handlers in flight, with the peak since start and how
+  long the oldest one has been running. That age is the difference between
+  "busy" and "wedged": an operation past `slow_operation_seconds` has held its
+  association slot for that whole time and marks the snapshot as stuck.
+  Compare
   against the pool's **totals**, which the startup line spells out: the caps
   are per AET, so capacity is `per_aet_cap x len(pool.members)` concurrent
   C-MOVEs and `per_aet_find_cap x len(pool.members)` concurrent C-FINDs.

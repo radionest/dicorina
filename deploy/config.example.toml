@@ -120,16 +120,21 @@ test_series_uid = ""
 [logging]
 # Level for dicorina's own loggers and the dimsechord core.
 level = "INFO"
-# pynetdicom's level is separate because its verbosity is a different order of
-# magnitude. INFO adds a couple of lines per association — including the
-# "Rejecting Association" record emitted when the AE's concurrent-association
-# limit is hit. DEBUG dumps every PDU: use it for short captures only.
+# pynetdicom's level is separate, and expensive: its default
+# LOG_HANDLER_LEVEL="standard" binds per-DIMSE-message handlers, so INFO costs
+# roughly three lines per relayed instance — thousands per study — written
+# synchronously to the journal by every association thread. You do NOT need it
+# to see refused associations: dicorina logs those at WARNING with the decoded
+# A-ASSOCIATE-RJ reason. Use INFO for a short capture on a quiet box only;
+# DEBUG additionally dumps every PDU.
 pynetdicom_level = "WARNING"
 # Interval of the periodic load snapshot (dimse associations in use, in-flight
-# operations, thread count, executor queue, event-loop lag). 0 disables it.
+# operations and how long the oldest has been running, thread count, executor
+# queue, event-loop lag). 0 disables it.
 snapshot_interval_seconds = 60.0
 # A DIMSE handler that takes at least this long logs at WARNING when it
-# finishes: it held an association slot for that whole time.
+# finishes, and an operation in flight for longer marks the snapshot as stuck:
+# it has held an association slot for that whole time. Must be > 0.
 slow_operation_seconds = 10.0
 
 # Both levels can also be overridden without editing this file, via the

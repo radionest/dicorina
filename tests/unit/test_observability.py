@@ -8,6 +8,8 @@ import asyncio
 import io
 import logging
 import logging.config
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -105,8 +107,42 @@ def test_pynetdicom_level_is_independent() -> None:
 def test_inflight_counter_tracks_current_and_peak() -> None:
     counter = InflightCounter()
     with counter.track("find"), counter.track("find"):
-        assert counter.snapshot()["find"] == (2, 2)
-    assert counter.snapshot()["find"] == (0, 2)
+        now, peak, _ = counter.snapshot()["find"]
+        assert (now, peak) == (2, 2)
+    now, peak, oldest = counter.snapshot()["find"]
+    assert (now, peak, oldest) == (0, 2, 0.0)
+
+
+def test_inflight_counter_ages_the_oldest_operation() -> None:
+    """An operation that never returns never logs a completion line — its only
+    trace is sitting in the counter getting older while it holds a slot."""
+    counter = InflightCounter()
+    with counter.track("find"):
+        time.sleep(0.02)
+        with counter.track("find"):
+            now, _, oldest = counter.snapshot()["find"]
+            assert now == 2
+            assert oldest >= 0.02  # the age of the OUTER one, not the newest
+
+
+def test_inflight_counter_is_concurrency_safe() -> None:
+    """track() runs on pynetdicom worker threads, several at once."""
+    counter = InflightCounter()
+    barrier = threading.Barrier(9)
+
+    def worker() -> None:
+        with counter.track("store"):
+            barrier.wait(timeout=5)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    barrier.wait(timeout=5)
+    for t in threads:
+        t.join(timeout=5)
+
+    now, peak, _ = counter.snapshot()["store"]
+    assert (now, peak) == (0, 8)
 
 
 def _fake_face(*, live: int, maximum: int, sessions: int = 0) -> Any:
@@ -116,6 +152,49 @@ def _fake_face(*, live: int, maximum: int, sessions: int = 0) -> Any:
         inflight=counter,
         store_session_count=lambda: sessions,
     )
+
+
+async def test_snapshot_warns_on_an_operation_stuck_past_the_slow_threshold(caplog) -> None:
+    """The failure this PR exists for: an operation that holds its association
+    slot and never finishes, so it never logs a completion line either."""
+    face = _fake_face(live=3, maximum=10)
+    loop = LoadSnapshotLoop(face, slow_operation_seconds=0.01)
+
+    with face.inflight.track("find"):
+        await asyncio.sleep(0.02)
+        with caplog.at_level(logging.INFO, logger="dicorina.stats"):
+            loop.log_once()
+
+    assert caplog.records[0].levelno == logging.WARNING
+    assert "find in flight past slow_operation_seconds" in caplog.text
+    assert "oldest" in caplog.text
+
+
+async def test_snapshot_stays_at_info_while_operations_are_young(caplog) -> None:
+    face = _fake_face(live=3, maximum=10)
+    loop = LoadSnapshotLoop(face, slow_operation_seconds=60.0)
+
+    with face.inflight.track("find"), caplog.at_level(logging.INFO, logger="dicorina.stats"):
+        loop.log_once()
+
+    assert caplog.records[0].levelno == logging.INFO
+    assert "find=1(peak 1, oldest" in caplog.text
+
+
+async def test_snapshot_loop_survives_a_failing_log_once(caplog) -> None:
+    """A monitor that dies is silent, which is the failure class this removes."""
+    face = _fake_face(live=1, maximum=10)
+    face.association_load = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    loop = LoadSnapshotLoop(face, interval_seconds=0.01)
+
+    with caplog.at_level(logging.ERROR, logger="dicorina.stats"):
+        loop.start()
+        await asyncio.sleep(0.05)
+        still_running = loop._task is not None and not loop._task.done()
+        loop.stop()
+
+    assert still_running, "the loop must outlive an exception from log_once"
+    assert "Load snapshot failed" in caplog.text
 
 
 async def test_snapshot_logs_load_at_info(caplog) -> None:
@@ -150,7 +229,8 @@ async def test_snapshot_warns_on_event_loop_lag(caplog) -> None:
 
 async def test_executor_load_reports_worker_saturation() -> None:
     loop = asyncio.get_running_loop()
-    assert executor_load(loop) == "0/0"  # no to_thread call has built one yet
+    # Distinct from "0/0", which would read as evidence the executor is idle.
+    assert executor_load(loop) == "none"
 
     await asyncio.to_thread(lambda: None)
     queued, _, workers = executor_load(loop).partition("/")

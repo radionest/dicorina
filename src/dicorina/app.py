@@ -169,7 +169,9 @@ async def lifespan(app: FastAPI):
     app.state.dimse = dimse
 
     snapshot = LoadSnapshotLoop(
-        dimse, interval_seconds=cfg.logging.snapshot_interval_seconds
+        dimse,
+        interval_seconds=cfg.logging.snapshot_interval_seconds,
+        slow_operation_seconds=cfg.logging.slow_operation_seconds,
     )
     snapshot.start()
     app.state.snapshot = snapshot

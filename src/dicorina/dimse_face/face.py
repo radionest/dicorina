@@ -240,6 +240,11 @@ class DimseFace:
             self._server = None
             self._ae = None
             logger.info("DIMSE face stopped in %.1fs", time.monotonic() - started)
+        with self._assoc_lock:
+            # Each entry pins an Association (thread, socket, contexts); an
+            # association that ends without RELEASED/ABORTED/CONN_CLOSE would
+            # otherwise hold one for the rest of the process.
+            self._assoc_stats.clear()
         with self._store_lock:
             idle = [
                 (assoc, session)
@@ -326,7 +331,10 @@ class DimseFace:
         """
         elapsed = time.monotonic() - started
         level = logging.WARNING if elapsed >= self._slow_seconds else logging.INFO
-        logger.log(level, f"{op} {outcome} in %.1fs ({fmt})", elapsed, *args)
+        # op/outcome go through as arguments, not spliced into the template: a
+        # stray '%' in either would blank the record, and one stable template
+        # per operation keeps the journal aggregatable.
+        logger.log(level, f"%s %s in %.1fs ({fmt})", op, outcome, elapsed, *args)
 
     def _on_echo(self, event: evt.Event) -> int:
         self._bump(event.assoc, "echo")
@@ -430,7 +438,14 @@ class DimseFace:
         the association doomed and let ``_on_store``'s own ``finally`` pop and
         close once ``store()`` has returned, so the two never race.
         """
-        self._log_assoc_end(event)
+        try:
+            self._log_assoc_end(event)
+        except Exception:
+            # pynetdicom swallows exceptions raised by notification handlers,
+            # so a failure in the log line would silently skip the cleanup
+            # below — leaking a relay association that has no idle timeout of
+            # its own to close it. Log it first, then clean up regardless.
+            logger.exception("association-end logging failed")
         with self._store_lock:
             if event.assoc in self._store_inflight:
                 self._store_doomed.add(event.assoc)
@@ -546,20 +561,25 @@ class DimseFace:
                 yield (0xC000, None)
                 return
             finally:
-                # break/close/GeneratorExit → upstream abort + find-lease release,
-                # deterministic instead of waiting on GC (mirrors the HTTP path).
-                gen.close()  # type: ignore[attr-defined]
-                self._finished(
-                    "C-FIND",
-                    started,
-                    outcome,
-                    "peer=%s level=%s study=%s series=%s matched=%d",
-                    peer,
-                    level or "-",
-                    study or "-",
-                    series or "-",
-                    matched,
-                )
+                try:
+                    # break/close/GeneratorExit → upstream abort + find-lease
+                    # release, deterministic instead of waiting on GC (mirrors
+                    # the HTTP path).
+                    gen.close()  # type: ignore[attr-defined]
+                finally:
+                    # Still report how long the slot was held even when the
+                    # upstream cleanup is what failed.
+                    self._finished(
+                        "C-FIND",
+                        started,
+                        outcome,
+                        "peer=%s level=%s study=%s series=%s matched=%d",
+                        peer,
+                        level or "-",
+                        study or "-",
+                        series or "-",
+                        matched,
+                    )
         yield (0x0000, None)
 
     def _on_move(self, event: evt.Event) -> Iterator[Any]:

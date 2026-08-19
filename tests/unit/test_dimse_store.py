@@ -130,6 +130,34 @@ def test_assoc_end_without_session_is_noop() -> None:
     face._on_assoc_end(_end_event(object()))  # must not raise
 
 
+def test_assoc_end_cleans_up_even_if_logging_raises(caplog) -> None:
+    """pynetdicom swallows exceptions from notification handlers, so a failure
+    in the log line must not skip the session close — the leaked relay
+    association has no idle timeout of its own to shut it down."""
+    face = _face()
+    face._ae = SimpleNamespace(active_associations=[], maximum_associations=10)
+    a = object()
+    face._on_accepted(SimpleNamespace(assoc=a))
+    face._on_store(_store_event(a))
+
+    broken = SimpleNamespace(assoc=a, event=SimpleNamespace())  # no .name -> raises
+
+    with caplog.at_level(logging.ERROR, logger="dicorina.dimse_face.face"):
+        face._on_assoc_end(broken)
+
+    assert _FakeSession.instances[0].closed, "store session must be closed regardless"
+    assert face._store_sessions == {}
+    assert "association-end logging failed" in caplog.text
+
+
+def test_stop_clears_association_stats() -> None:
+    face = _face()
+    face._ae = SimpleNamespace(active_associations=[], maximum_associations=10)
+    face._on_accepted(SimpleNamespace(assoc=object()))
+    face.stop()
+    assert face._assoc_stats == {}
+
+
 def test_stop_closes_leftover_sessions() -> None:
     face = _face()
     face._on_store(_store_event(object()))

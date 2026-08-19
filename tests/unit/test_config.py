@@ -157,6 +157,20 @@ def test_logging_defaults(tmp_path) -> None:
     assert cfg.logging.slow_operation_seconds == 10.0
 
 
+def test_zero_slow_operation_seconds_rejected(tmp_path) -> None:
+    """0 disables snapshot_interval_seconds, but would make every operation
+    warn here — reject it rather than invert the neighbouring knob's meaning."""
+    with pytest.raises(ValueError):
+        DicorinaConfig.model_validate(
+            {
+                "pacs": {"host": "h"},
+                "scp": {},
+                "cache": {"dir": str(tmp_path)},
+                "logging": {"slow_operation_seconds": 0},
+            }
+        )
+
+
 def test_log_level_is_case_insensitive(tmp_path) -> None:
     cfg = DicorinaConfig.model_validate(
         {

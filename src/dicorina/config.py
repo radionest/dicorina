@@ -96,16 +96,22 @@ class LoggingConfig(BaseModel):
 
     # dicorina's own loggers plus the dimsechord core.
     level: str = "INFO"
-    # pynetdicom is a separate knob because its verbosity is a different order
-    # of magnitude: INFO adds a couple of lines per association — including the
-    # "Rejecting Association" record emitted when the AE's association limit is
-    # hit — while DEBUG dumps every PDU and is only usable for short captures.
+    # pynetdicom is a separate knob, and an expensive one: its default
+    # LOG_HANDLER_LEVEL="standard" binds per-DIMSE-message handlers, so INFO
+    # costs about three lines per relayed instance (thousands per study),
+    # written synchronously to the journal by every association thread. Raising
+    # it is NOT needed to see refused associations — the face logs those at
+    # WARNING with the decoded reason. Use INFO for a short capture on a quiet
+    # box; DEBUG dumps every PDU on top of that.
     pynetdicom_level: str = "WARNING"
     # Interval of the periodic load snapshot (0 disables it).
     snapshot_interval_seconds: float = 60.0
     # A DIMSE handler that runs at least this long logs at WARNING when it
-    # finishes: it held an association slot for that whole time.
-    slow_operation_seconds: float = 10.0
+    # finishes, and an operation in flight for longer marks the load snapshot
+    # as stuck: it has held an association slot for that whole time. Must be
+    # > 0 — unlike snapshot_interval_seconds, 0 would not disable the warning
+    # but fire it on every single operation.
+    slow_operation_seconds: float = Field(default=10.0, gt=0)
 
     @field_validator("level", "pynetdicom_level", mode="before")
     @classmethod

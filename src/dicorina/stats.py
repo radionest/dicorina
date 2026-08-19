@@ -31,29 +31,46 @@ _LAG_WARN_MS = 1000.0
 
 
 class InflightCounter:
-    """Per-operation in-flight counts, incremented from the SCP worker threads."""
+    """Per-operation in-flight counts and ages, from the SCP worker threads.
+
+    The age matters as much as the count: an operation that never returns logs
+    nothing when it finishes, because it never finishes — the only trace it
+    leaves is sitting in here getting older while it holds an association slot.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._current: dict[str, int] = {}
         self._peak: dict[str, int] = {}
+        self._started: dict[str, dict[int, float]] = {}
+        self._next_token = 0
 
     @contextmanager
     def track(self, kind: str) -> Iterator[None]:
+        started = time.monotonic()
         with self._lock:
-            current = self._current.get(kind, 0) + 1
-            self._current[kind] = current
-            self._peak[kind] = max(self._peak.get(kind, 0), current)
+            self._next_token += 1
+            token = self._next_token
+            live = self._started.setdefault(kind, {})
+            live[token] = started
+            self._peak[kind] = max(self._peak.get(kind, 0), len(live))
         try:
             yield
         finally:
             with self._lock:
-                self._current[kind] -= 1
+                self._started[kind].pop(token, None)
 
-    def snapshot(self) -> dict[str, tuple[int, int]]:
-        """``{kind: (in flight now, peak since start)}`` for every kind seen."""
+    def snapshot(self) -> dict[str, tuple[int, int, float]]:
+        """``{kind: (in flight now, peak since start, age of the oldest)}``.
+
+        The age is 0 for a kind with nothing in flight.
+        """
+        now = time.monotonic()
         with self._lock:
-            return {kind: (self._current[kind], peak) for kind, peak in self._peak.items()}
+            out: dict[str, tuple[int, int, float]] = {}
+            for kind, peak in self._peak.items():
+                live = self._started.get(kind) or {}
+                out[kind] = (len(live), peak, now - min(live.values()) if live else 0.0)
+            return out
 
 
 def executor_load(loop: asyncio.AbstractEventLoop) -> str:
@@ -67,7 +84,10 @@ def executor_load(loop: asyncio.AbstractEventLoop) -> str:
     """
     executor = getattr(loop, "_default_executor", None)
     if executor is None:
-        return "0/0"
+        # Distinct from "0/0": no to_thread call has built one yet, or the loop
+        # implementation keeps it elsewhere. Reporting an idle executor here
+        # would read as evidence it is idle.
+        return "none"
     work_queue = getattr(executor, "_work_queue", None)
     max_workers = getattr(executor, "_max_workers", None)
     if work_queue is None or max_workers is None:
@@ -78,9 +98,16 @@ def executor_load(loop: asyncio.AbstractEventLoop) -> str:
 class LoadSnapshotLoop:
     """Logs one load line per interval, at WARNING when a limit is reached."""
 
-    def __init__(self, face: DimseFace, *, interval_seconds: float = 60.0) -> None:
+    def __init__(
+        self,
+        face: DimseFace,
+        *,
+        interval_seconds: float = 60.0,
+        slow_operation_seconds: float = 10.0,
+    ) -> None:
         self._face = face
         self._interval = interval_seconds
+        self._slow_seconds = slow_operation_seconds
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -109,7 +136,17 @@ class LoadSnapshotLoop:
     def log_once(self, *, lag_ms: float = 0.0) -> None:
         live, maximum = self._face.association_load()
         inflight = self._face.inflight.snapshot()
-        ops = " ".join(f"{k}={now}(peak {peak})" for k, (now, peak) in sorted(inflight.items()))
+        ops = " ".join(
+            f"{k}={now}(peak {peak}, oldest {oldest:.0f}s)"
+            if now
+            else f"{k}=0(peak {peak})"
+            for k, (now, peak, oldest) in sorted(inflight.items())
+        )
+        stuck = [
+            k
+            for k, (now, _, oldest) in inflight.items()
+            if now and oldest >= self._slow_seconds
+        ]
         line = (
             f"load: dimse_assoc={live}/{maximum} "
             f"store_sessions={self._face.store_session_count()} "
@@ -120,6 +157,11 @@ class LoadSnapshotLoop:
         reasons = []
         if maximum and live >= maximum:
             reasons.append("association limit reached — further requests are being refused")
+        if stuck:
+            reasons.append(
+                f"{', '.join(sorted(stuck))} in flight past slow_operation_seconds "
+                "— holding association slots"
+            )
         if lag_ms > _LAG_WARN_MS:
             reasons.append("event loop blocked")
         if reasons:
