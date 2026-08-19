@@ -97,9 +97,12 @@ class LoadSnapshotLoop:
             while True:
                 due = time.monotonic() + self._interval
                 await asyncio.sleep(self._interval)
-                # Overshoot is event-loop lag: the loop could not resume this
-                # timer on time because something blocked it.
-                self.log_once(lag_ms=(time.monotonic() - due) * 1000)
+                try:
+                    # Overshoot is event-loop lag: the loop could not resume
+                    # this timer on time because something blocked it.
+                    self.log_once(lag_ms=(time.monotonic() - due) * 1000)
+                except Exception as e:  # never let the loop die (as EvictionLoop)
+                    logger.error(f"Load snapshot failed: {e}")
         except asyncio.CancelledError:
             pass
 

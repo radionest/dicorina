@@ -171,10 +171,15 @@ class DimseFace:
         further association request with an A-ASSOCIATE-RJ before any handler
         of ours runs — which is what clients report as "cannot connect".
         """
-        if self._ae is None:
+        # Read once: stop() clears _ae from the event-loop thread while
+        # pynetdicom's acceptor threads are still calling in here, and an
+        # AttributeError raised for a log line would abort the association
+        # cleanup that called it.
+        ae = self._ae
+        if ae is None:
             return (0, 0)
-        live = [assoc for assoc in self._ae.active_associations if assoc.is_acceptor]
-        return (len(live), self._ae.maximum_associations)
+        live = [assoc for assoc in ae.active_associations if assoc.is_acceptor]
+        return (len(live), ae.maximum_associations)
 
     def store_session_count(self) -> int:
         """Outbound C-STORE relay associations currently open toward the PACS."""

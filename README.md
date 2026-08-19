@@ -65,9 +65,13 @@ of that a snapshot line lands every `snapshot_interval_seconds`:
   see a rejected or timed-out connect. The snapshot escalates to WARNING here,
   and each refusal is logged with its decoded reason.
 - `ops[...]` — DIMSE handlers in flight, with the peak since start. Compare
-  against `pool.per_aet_find_cap` (concurrent C-FINDs) and `pool.per_aet_cap`
-  (concurrent C-MOVEs), both logged at startup: handlers queued behind an
-  exhausted pool keep their association slots the whole time they wait.
+  against the pool's **totals**, which the startup line spells out: the caps
+  are per AET, so capacity is `per_aet_cap x len(pool.members)` concurrent
+  C-MOVEs and `per_aet_find_cap x len(pool.members)` concurrent C-FINDs.
+  Handlers queued behind an exhausted pool keep their association slots for
+  the whole wait. Note this counter covers the DIMSE face only, while QIDO and
+  WADO lease the same pool — a C-FIND can be queued behind HTTP traffic that
+  `ops[...]` does not show.
 - `executor=queued/workers` — asyncio's default thread executor, which every
   streaming QIDO/WADO response occupies for its whole lifetime. A non-zero
   queue means further `to_thread` calls are waiting, and HTTP requests hang

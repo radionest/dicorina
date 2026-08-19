@@ -83,12 +83,14 @@ async def lifespan(app: FastAPI):
     # The concurrency ceilings and the timeouts that decide how long each slot
     # stays taken: the numbers any load incident has to be read against.
     logger.info(
-        "pool: AETs %s, per_aet_cap=%d (concurrent C-MOVEs), per_aet_find_cap=%d "
-        "(concurrent C-FINDs); timeouts cfind=%.0fs cmove=%.0fs arrival=%.0fs "
-        "find_lease=%.0fs store=%.0fs",
+        "pool: AETs %s, per_aet_cap=%d/AET (%d concurrent C-MOVEs in total), "
+        "per_aet_find_cap=%d/AET (%d concurrent C-FINDs in total); "
+        "timeouts cfind=%.0fs cmove=%.0fs arrival=%.0fs find_lease=%.0fs store=%.0fs",
         [m.aet for m in members],
         cfg.pool.per_aet_cap,
+        cfg.pool.per_aet_cap * len(members),
         cfg.pool.per_aet_find_cap,
+        cfg.pool.per_aet_find_cap * len(members),
         cfg.timeouts.cfind,
         cfg.timeouts.cmove,
         cfg.timeouts.arrival,
