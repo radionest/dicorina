@@ -6,7 +6,7 @@ import os
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class PacsConfig(BaseModel):
@@ -88,6 +88,38 @@ class HealthcheckConfig(BaseModel):
     test_series_uid: str = ""
 
 
+_LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
+
+
+class LoggingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # dicorina's own loggers plus the dimsechord core.
+    level: str = "INFO"
+    # pynetdicom is a separate knob because its verbosity is a different order
+    # of magnitude: INFO adds a couple of lines per association — including the
+    # "Rejecting Association" record emitted when the AE's association limit is
+    # hit — while DEBUG dumps every PDU and is only usable for short captures.
+    pynetdicom_level: str = "WARNING"
+    # Interval of the periodic load snapshot (0 disables it).
+    snapshot_interval_seconds: float = 60.0
+    # A DIMSE handler that runs at least this long logs at WARNING when it
+    # finishes: it held an association slot for that whole time.
+    slow_operation_seconds: float = 10.0
+
+    @field_validator("level", "pynetdicom_level", mode="before")
+    @classmethod
+    def _normalize_level(cls, value: object) -> str:
+        return str(value).upper()
+
+    @field_validator("level", "pynetdicom_level")
+    @classmethod
+    def _known_level(cls, value: str) -> str:
+        if value not in _LOG_LEVELS:
+            raise ValueError(f"unknown log level {value!r}; expected one of {_LOG_LEVELS}")
+        return value
+
+
 class OhifConfig(BaseModel):
     enabled: bool = False
     friendly_name: str = "dicorina"
@@ -103,13 +135,26 @@ class DicorinaConfig(BaseModel):
     http: HttpConfig = Field(default_factory=HttpConfig)
     timeouts: TimeoutsConfig = Field(default_factory=TimeoutsConfig)
     healthcheck: HealthcheckConfig = Field(default_factory=HealthcheckConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     ohif: OhifConfig = Field(default_factory=OhifConfig)
 
 
 def load_config(path: str | Path) -> DicorinaConfig:
-    """Load + validate the TOML config; DICORINA_AUTH_TOKEN env overrides http.auth_token."""
+    """Load + validate the TOML config; DICORINA_* env vars override matching keys.
+
+    The log-level overrides exist so an operator can raise verbosity on a
+    running box with a drop-in unit override and a restart, without editing
+    the deployed config file.
+    """
     data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     token = os.environ.get("DICORINA_AUTH_TOKEN")
     if token is not None:
         data.setdefault("http", {})["auth_token"] = token
+    for env_var, key in (
+        ("DICORINA_LOG_LEVEL", "level"),
+        ("DICORINA_PYNETDICOM_LOG_LEVEL", "pynetdicom_level"),
+    ):
+        level = os.environ.get(env_var)
+        if level is not None:
+            data.setdefault("logging", {})[key] = level
     return DicorinaConfig.model_validate(data)

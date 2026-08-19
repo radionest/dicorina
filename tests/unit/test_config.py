@@ -147,6 +147,52 @@ def test_dimse_aet_and_find_cap_from_toml(tmp_path) -> None:
     assert cfg.timeouts.find_lease == 0.5
 
 
+def test_logging_defaults(tmp_path) -> None:
+    cfg = DicorinaConfig.model_validate(
+        {"pacs": {"host": "h"}, "scp": {}, "cache": {"dir": str(tmp_path)}}
+    )
+    assert cfg.logging.level == "INFO"
+    assert cfg.logging.pynetdicom_level == "WARNING"
+    assert cfg.logging.snapshot_interval_seconds == 60.0
+    assert cfg.logging.slow_operation_seconds == 10.0
+
+
+def test_log_level_is_case_insensitive(tmp_path) -> None:
+    cfg = DicorinaConfig.model_validate(
+        {
+            "pacs": {"host": "h"},
+            "scp": {},
+            "cache": {"dir": str(tmp_path)},
+            "logging": {"level": "debug"},
+        }
+    )
+    assert cfg.logging.level == "DEBUG"
+
+
+def test_unknown_log_level_rejected(tmp_path) -> None:
+    """A typo must fail at startup, not silently leave the journal empty."""
+    with pytest.raises(ValueError):
+        DicorinaConfig.model_validate(
+            {
+                "pacs": {"host": "h"},
+                "scp": {},
+                "cache": {"dir": str(tmp_path)},
+                "logging": {"level": "VERBOSE"},
+            }
+        )
+
+
+def test_log_level_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Raising verbosity on a running box must not require editing the config."""
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(_MINIMAL, encoding="utf-8")
+    monkeypatch.setenv("DICORINA_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("DICORINA_PYNETDICOM_LOG_LEVEL", "INFO")
+    cfg = load_config(cfg_file)
+    assert cfg.logging.level == "DEBUG"
+    assert cfg.logging.pynetdicom_level == "INFO"
+
+
 def test_store_config_defaults(tmp_path) -> None:
     cfg = DicorinaConfig.model_validate(
         {"pacs": {"host": "10.0.0.1"}, "scp": {}, "cache": {"dir": str(tmp_path)}}

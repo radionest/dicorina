@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from pynetdicom import AE
@@ -47,18 +48,37 @@ class Healthcheck:
             assoc.release()
 
     async def startup(self) -> None:
+        started = time.monotonic()
         try:
             ok = await asyncio.to_thread(self._echo_sync)
         except Exception as e:
             logger.error(f"Startup C-ECHO error: {e}")
             ok = False
         self._pacs_echo = "ok" if ok else "fail"
+        elapsed = time.monotonic() - started
         if not ok:
-            logger.error("Startup C-ECHO to PACS failed — proxy is degraded")
+            logger.error(
+                "Startup C-ECHO to %s@%s:%s failed after %.1fs — proxy is degraded",
+                self._pacs.aet,
+                self._pacs.host,
+                self._pacs.port,
+                elapsed,
+            )
+            return
+        # Logged on success too: it timestamps the last moment the PACS link
+        # was known good, which is what a later stall has to be read against.
+        logger.info(
+            "Startup C-ECHO to %s@%s:%s ok in %.1fs",
+            self._pacs.aet,
+            self._pacs.host,
+            self._pacs.port,
+            elapsed,
+        )
 
     async def _run_self_test(self) -> None:
         if self._engine is None or not self._config.test_study_uid:
             return
+        started = time.monotonic()
         try:
             cached = await self._engine.ensure_series(
                 self._config.test_study_uid, self._config.test_series_uid
@@ -67,6 +87,15 @@ class Healthcheck:
         except Exception as e:
             logger.error(f"Move-to-self self-test failed: {e}")
             self._self_test = "fail"
+            return
+        # A periodic end-to-end probe of the pool, the C-MOVE path and the
+        # storage SCP: its latency trend is the earliest sign of saturation.
+        logger.info(
+            "Move-to-self self-test %s in %.1fs (%d instance(s))",
+            self._self_test,
+            time.monotonic() - started,
+            len(cached.instances),
+        )
 
     def start(self) -> None:
         if self._task is None and self._config.test_study_uid:

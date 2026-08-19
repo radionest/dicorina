@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -17,11 +19,30 @@ from dimsechord import (
 )
 from fastapi import FastAPI
 
+from dicorina import __version__
 from dicorina.errors import register_exception_handlers
 from dicorina.eviction import EvictionLoop
+from dicorina.stats import LoadSnapshotLoop
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dicorina.config import DicorinaConfig
+
+logger = logging.getLogger(__name__)
+
+
+def _timed_stop(name: str, stop: Callable[[], None]) -> None:
+    """Run one shutdown step and log how long it took.
+
+    systemd SIGKILLs the process once ``TimeoutStopSec`` elapses; without a
+    line per step there is no way to tell afterwards which one ran over.
+    """
+    started = time.monotonic()
+    try:
+        stop()
+    finally:
+        logger.info("shutdown: %s took %.1fs", name, time.monotonic() - started)
 
 
 def _configure_pydicom() -> None:
@@ -46,7 +67,34 @@ async def lifespan(app: FastAPI):
     _configure_pydicom()
     cfg: DicorinaConfig = app.state.config
 
+    logger.info(
+        "dicorina %s starting — pacs %s@%s:%s, dimse face %s on %s:%s, http %s:%s",
+        __version__,
+        cfg.pacs.aet,
+        cfg.pacs.host,
+        cfg.pacs.port,
+        cfg.dimse.aet,
+        cfg.dimse.listen_ip,
+        cfg.dimse.listen_port,
+        cfg.http.bind_host,
+        cfg.http.bind_port,
+    )
     members = cfg.pool.members
+    # The concurrency ceilings and the timeouts that decide how long each slot
+    # stays taken: the numbers any load incident has to be read against.
+    logger.info(
+        "pool: AETs %s, per_aet_cap=%d (concurrent C-MOVEs), per_aet_find_cap=%d "
+        "(concurrent C-FINDs); timeouts cfind=%.0fs cmove=%.0fs arrival=%.0fs "
+        "find_lease=%.0fs store=%.0fs",
+        [m.aet for m in members],
+        cfg.pool.per_aet_cap,
+        cfg.pool.per_aet_find_cap,
+        cfg.timeouts.cfind,
+        cfg.timeouts.cmove,
+        cfg.timeouts.arrival,
+        cfg.timeouts.find_lease,
+        cfg.timeouts.store,
+    )
     pool = AssociationPool(
         [m.aet for m in members], cfg.pool.per_aet_cap, cfg.pool.per_aet_find_cap
     )
@@ -113,9 +161,16 @@ async def lifespan(app: FastAPI):
         cfind_timeout=cfg.timeouts.cfind,
         store_aet=cfg.pacs.store_aet,
         store_timeout=cfg.timeouts.store,
+        slow_operation_seconds=cfg.logging.slow_operation_seconds,
     )
     dimse.start(cfg.dimse.listen_port, cfg.dimse.listen_ip)
     app.state.dimse = dimse
+
+    snapshot = LoadSnapshotLoop(
+        dimse, interval_seconds=cfg.logging.snapshot_interval_seconds
+    )
+    snapshot.start()
+    app.state.snapshot = snapshot
 
     eviction = EvictionLoop(cache, cfg.cache.eviction_interval_seconds)
     eviction.start()
@@ -124,11 +179,13 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        logger.info("shutdown: stopping background loops")
+        snapshot.stop()
         health.stop()
         eviction.stop()
-        dimse.stop()
-        scp.stop()
-        cache.shutdown()
+        _timed_stop("dimse face", dimse.stop)
+        _timed_stop("storage scp", scp.stop)
+        _timed_stop("cache", cache.shutdown)
 
 
 def create_app(config: DicorinaConfig) -> FastAPI:

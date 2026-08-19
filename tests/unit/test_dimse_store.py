@@ -3,6 +3,7 @@ lifecycle and status mapping (spec: dimse-store-relay)."""
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
@@ -55,8 +56,8 @@ def _store_event(assoc: object) -> Any:
     return SimpleNamespace(assoc=assoc, dataset=ds, file_meta=meta)
 
 
-def _end_event(assoc: object) -> Any:
-    return SimpleNamespace(assoc=assoc)
+def _end_event(assoc: object, name: str = "EVT_RELEASED") -> Any:
+    return SimpleNamespace(assoc=assoc, event=SimpleNamespace(name=name))
 
 
 def test_session_created_lazily_per_association() -> None:
@@ -134,6 +135,36 @@ def test_stop_closes_leftover_sessions() -> None:
     face._on_store(_store_event(object()))
     face.stop()
     assert _FakeSession.instances[0].closed
+
+
+def test_non_success_status_is_logged(caplog) -> None:
+    """The PACS's status relays to the client verbatim, so without this line the
+    client reports failed instances that dicorina's journal never mentions."""
+    face = _face()
+    a = object()
+    face._on_store(_store_event(a))
+    _FakeSession.instances[0].status = 0xA700
+
+    with caplog.at_level(logging.WARNING, logger="dicorina.dimse_face.face"):
+        assert face._on_store(_store_event(a)) == 0xA700
+
+    assert "non-success status 0xA700" in caplog.text
+
+
+def test_association_summary_counts_relayed_instances(caplog) -> None:
+    face = _face()
+    face._ae = SimpleNamespace(active_associations=[], maximum_associations=10)
+    a = object()
+    face._on_accepted(SimpleNamespace(assoc=a))
+    face._on_store(_store_event(a))
+    _FakeSession.instances[0].status = 0xA700
+    face._on_store(_store_event(a))
+
+    with caplog.at_level(logging.INFO, logger="dicorina.dimse_face.face"):
+        face._on_assoc_end(_end_event(a))
+
+    assert "store_ok=1" in caplog.text
+    assert "store_failed=1" in caplog.text
 
 
 def test_configured_identity_and_timeout() -> None:

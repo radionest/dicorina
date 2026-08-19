@@ -12,7 +12,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from concurrent.futures import TimeoutError as FuturesTimeout
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from dimsechord import (
@@ -36,6 +38,8 @@ from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     Verification,
 )
 
+from dicorina.stats import InflightCounter
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -45,6 +49,50 @@ if TYPE_CHECKING:
     from dicorina.dimse_face.allowlist import DestinationAllowlist
 
 logger = logging.getLogger(__name__)
+
+# A-ASSOCIATE-RJ result/source/reason triples (PS3.8 Table 9-21), decoded so a
+# rejection reads as a cause instead of three hex numbers.
+_REJECT_RESULT: dict[Any, str] = {0x01: "permanent", 0x02: "transient"}
+_REJECT_SOURCE: dict[Any, str] = {
+    0x01: "service-user",
+    0x02: "service-provider (ACSE)",
+    0x03: "service-provider (presentation)",
+}
+_REJECT_REASON: dict[Any, str] = {
+    (0x01, 0x01): "no reason given",
+    (0x01, 0x02): "application context name not supported",
+    (0x01, 0x03): "calling AE title not recognised",
+    (0x01, 0x07): "called AE title not recognised",
+    (0x02, 0x01): "no reason given",
+    (0x02, 0x02): "protocol version not supported",
+    (0x03, 0x01): "temporary congestion",
+    (0x03, 0x02): "local limit exceeded",
+}
+
+
+def _peer(assoc: Any) -> str:
+    """``AET@host:port`` of the association requestor, for log context."""
+    try:
+        info = assoc.requestor.info  # a ServiceUser property, not a method
+        return f"{info['ae_title']}@{info['address']}:{info['port']}"
+    except Exception:
+        # Log context must never be the reason a handler fails.
+        return "unknown-peer"
+
+
+@dataclass
+class _AssocStats:
+    """Per-inbound-association tallies, summarised in one line when it ends."""
+
+    peer: str
+    started: float
+    counts: dict[str, int] = field(default_factory=dict)
+
+    def bump(self, key: str) -> None:
+        self.counts[key] = self.counts.get(key, 0) + 1
+
+    def summary(self) -> str:
+        return " ".join(f"{k}={v}" for k, v in sorted(self.counts.items())) or "no operations"
 
 
 def _build_ae(aet: str) -> AE:
@@ -86,6 +134,7 @@ class DimseFace:
         cmove_count_timeout: float = 30.0,
         store_aet: str = "",
         store_timeout: float = 30.0,
+        slow_operation_seconds: float = 10.0,
     ) -> None:
         self._engine = engine
         self._client = client
@@ -105,6 +154,32 @@ class DimseFace:
         self._server: Any | None = None
         self._warned_keys: set[str] = set()
         self._warn_lock = threading.Lock()
+        self._slow_seconds = slow_operation_seconds
+        self._inflight = InflightCounter()
+        self._ae: AE | None = None
+        self._assoc_stats: dict[Any, _AssocStats] = {}
+        self._assoc_lock = threading.Lock()
+
+    @property
+    def inflight(self) -> InflightCounter:
+        return self._inflight
+
+    def association_load(self) -> tuple[int, int]:
+        """``(inbound associations alive, pynetdicom's cap)``.
+
+        Once the first number reaches the second, pynetdicom answers every
+        further association request with an A-ASSOCIATE-RJ before any handler
+        of ours runs — which is what clients report as "cannot connect".
+        """
+        if self._ae is None:
+            return (0, 0)
+        live = [assoc for assoc in self._ae.active_associations if assoc.is_acceptor]
+        return (len(live), self._ae.maximum_associations)
+
+    def store_session_count(self) -> int:
+        """Outbound C-STORE relay associations currently open toward the PACS."""
+        with self._store_lock:
+            return len(self._store_sessions)
 
     @property
     def is_running(self) -> bool:
@@ -117,6 +192,8 @@ class DimseFace:
         # holds upstream identities and no longer names the face.
         ae = _build_ae(self._aet)
         handlers: list[Any] = [
+            (evt.EVT_ACCEPTED, self._on_accepted),
+            (evt.EVT_REJECTED, self._on_rejected),
             (evt.EVT_C_ECHO, self._on_echo),
             (evt.EVT_C_FIND, self._on_find),
             (evt.EVT_C_MOVE, self._on_move),  # implemented in Task 8
@@ -125,8 +202,21 @@ class DimseFace:
             (evt.EVT_ABORTED, self._on_assoc_end),
             (evt.EVT_CONN_CLOSE, self._on_assoc_end),
         ]
+        self._ae = ae
         self._server = ae.start_server((ip, port), block=False, evt_handlers=handlers)
-        logger.info("DIMSE face listening on %s:%s (AET: %s)", ip, port, self._aet)
+        # maximum_associations is pynetdicom's own cap on concurrent inbound
+        # associations; it is logged because exceeding it refuses clients
+        # above our handlers, where nothing of ours would otherwise see it.
+        logger.info(
+            "DIMSE face listening on %s:%s (AET: %s, max_assoc=%d, "
+            "cfind_timeout=%.0fs store_timeout=%.0fs)",
+            ip,
+            port,
+            self._aet,
+            ae.maximum_associations,
+            self._cfind_timeout,
+            self._store_timeout,
+        )
 
     def stop(self) -> None:
         """Stop the DIMSE face and close idle store sessions.
@@ -138,9 +228,13 @@ class DimseFace:
         ``_on_assoc_end`` — so close() never races the store it belongs to.
         """
         if self._server is not None:
+            live, _ = self.association_load()
+            logger.info("DIMSE face stopping (%d association(s) still live)", live)
+            started = time.monotonic()
             self._server.shutdown()
             self._server = None
-            logger.info("DIMSE face stopped")
+            self._ae = None
+            logger.info("DIMSE face stopped in %.1fs", time.monotonic() - started)
         with self._store_lock:
             idle = [
                 (assoc, session)
@@ -157,8 +251,80 @@ class DimseFace:
             session.close()
 
     # ── handlers ──────────────────────────────────────────────────
-    @staticmethod
-    def _on_echo(event: evt.Event) -> int:  # noqa: ARG004
+    def _on_accepted(self, event: evt.Event) -> None:
+        peer = _peer(event.assoc)
+        with self._assoc_lock:
+            self._assoc_stats[event.assoc] = _AssocStats(peer=peer, started=time.monotonic())
+        live, maximum = self.association_load()
+        logger.info("association accepted from %s (%d/%d slots in use)", peer, live, maximum)
+        if maximum and live >= maximum:
+            logger.warning(
+                "association limit reached (%d/%d) — until a slot frees, every further "
+                "request from any client is refused before reaching a handler",
+                live,
+                maximum,
+            )
+
+    def _on_rejected(self, event: evt.Event) -> None:
+        """Log the A-ASSOCIATE-RJ that was just sent to a client.
+
+        pynetdicom announces its own rejection with a bare ``Rejecting
+        Association`` at INFO, so this is the only record that carries the
+        reason. Under load that reason is normally the association limit; the
+        other common one is a called AET that does not match ``dimse.aet``.
+        """
+        primitive = getattr(event.assoc.acceptor, "primitive", None)
+        source = getattr(primitive, "result_source", None)
+        diagnostic = getattr(primitive, "diagnostic", None)
+        requested = getattr(event.assoc.requestor, "primitive", None)
+        live, maximum = self.association_load()
+        logger.warning(
+            "association REJECTED from %s (called AET %r): %s, source %s — %s [%d/%d slots in use]",
+            _peer(event.assoc),
+            getattr(requested, "called_ae_title", "?"),
+            _REJECT_RESULT.get(getattr(primitive, "result", None), "?"),
+            _REJECT_SOURCE.get(source, "?"),
+            _REJECT_REASON.get((source, diagnostic), "unknown reason"),
+            live,
+            maximum,
+        )
+
+    def _log_assoc_end(self, event: evt.Event) -> None:
+        """Summarise an association once, whichever end-event fires first."""
+        with self._assoc_lock:
+            stats = self._assoc_stats.pop(event.assoc, None)
+        if stats is None:
+            return  # a later end-event for an association already summarised
+        live, maximum = self.association_load()
+        logger.info(
+            "association %s from %s after %.1fs [%s] (%d/%d slots in use)",
+            event.event.name.removeprefix("EVT_").lower(),
+            stats.peer,
+            time.monotonic() - stats.started,
+            stats.summary(),
+            live,
+            maximum,
+        )
+
+    def _bump(self, assoc: Any, key: str) -> None:
+        with self._assoc_lock:
+            stats = self._assoc_stats.get(assoc)
+            if stats is not None:
+                stats.bump(key)
+
+    def _finished(self, op: str, started: float, outcome: str, fmt: str, *args: object) -> None:
+        """One line per finished DIMSE operation, at WARNING once it ran long.
+
+        A slow operation is the shape of the load problem: it holds both its
+        SCP worker thread and its association slot for the whole duration, so a
+        handful of them is enough to lock every other client out.
+        """
+        elapsed = time.monotonic() - started
+        level = logging.WARNING if elapsed >= self._slow_seconds else logging.INFO
+        logger.log(level, f"{op} {outcome} in %.1fs ({fmt})", elapsed, *args)
+
+    def _on_echo(self, event: evt.Event) -> int:
+        self._bump(event.assoc, "echo")
         return 0x0000
 
     def _on_store(self, event: evt.Event) -> int:
@@ -187,12 +353,33 @@ class DimseFace:
                 self._store_sessions[assoc] = session
             self._store_inflight.add(assoc)
         sop = ""
+        started = time.monotonic()
         try:
-            ds = event.dataset
-            ds.file_meta = event.file_meta
-            sop = str(getattr(ds, "SOPInstanceUID", "") or "")
-            return session.store(ds)
+            with self._inflight.track("store"):
+                ds = event.dataset
+                ds.file_meta = event.file_meta
+                sop = str(getattr(ds, "SOPInstanceUID", "") or "")
+                status = session.store(ds)
+            logger.debug(
+                "C-STORE relay 0x%04X in %.2fs (sop=%s)",
+                status,
+                time.monotonic() - started,
+                sop or "-",
+            )
+            if status != 0x0000:
+                # The PACS's status relays verbatim to the client, so without
+                # this line the client counts failures dicorina never mentions.
+                self._warn_once(
+                    f"store-status:{status:04X}",
+                    "C-STORE relay: PACS answered non-success status 0x%04X (sop=%s peer=%s)",
+                    status,
+                    sop or "-",
+                    _peer(assoc),
+                )
+            self._bump(assoc, "store_ok" if status == 0x0000 else "store_failed")
+            return status
         except NoPresentationContextError as e:
+            self._bump(assoc, "store_failed")
             self._warn_once(
                 f"store-ctx:{e.sop_class_uid}:{e.transfer_syntax}",
                 "C-STORE relay refused: no upstream context for SOP class %s "
@@ -203,10 +390,19 @@ class DimseFace:
             )
             return 0x0122  # SOP class not supported
         except AssociationError as e:
-            logger.error("C-STORE relay failed [%s] (sop=%s): %s", type(e).__name__, sop or "-", e)
+            self._bump(assoc, "store_failed")
+            logger.error(
+                "C-STORE relay failed [%s] after %.1fs (sop=%s peer=%s): %s",
+                type(e).__name__,
+                time.monotonic() - started,
+                sop or "-",
+                _peer(assoc),
+                e,
+            )
             return 0xA700  # Out of resources
         except Exception:
-            logger.exception("C-STORE relay failed (sop=%s)", sop or "-")
+            self._bump(assoc, "store_failed")
+            logger.exception("C-STORE relay failed (sop=%s peer=%s)", sop or "-", _peer(assoc))
             return 0xC000
         finally:
             with self._store_lock:
@@ -229,6 +425,7 @@ class DimseFace:
         the association doomed and let ``_on_store``'s own ``finally`` pop and
         close once ``store()`` has returned, so the two never race.
         """
+        self._log_assoc_end(event)
         with self._store_lock:
             if event.assoc in self._store_inflight:
                 self._store_doomed.add(event.assoc)
@@ -279,49 +476,85 @@ class DimseFace:
         study = str(getattr(ident, "StudyInstanceUID", "") or "")
         series = str(getattr(ident, "SeriesInstanceUID", "") or "")
         model = event.context.abstract_syntax  # Patient/Study Root, as negotiated
-        gen = self._query.iter_find(ident, model=model, timeout=self._cfind_timeout)
-        try:
-            for ds in gen:
-                if event.is_cancelled:
-                    yield (0xFE00, None)  # upstream released in finally
-                    return
-                yield (0xFF00, ds)  # same SCP thread, no event loop hop
-        except (PoolExhaustedError, AssociationError) as e:
-            logger.error(
-                "DIMSE C-FIND refused [%s] (level=%s study=%s series=%s): %s",
-                type(e).__name__,
-                level or "-",
-                study or "-",
-                series or "-",
-                e,
-            )
-            yield (0xA700, None)  # Refused: Out of Resources
-            return
-        except FindFailedError as e:
-            logger.error(
-                "DIMSE C-FIND upstream failure [%s] (level=%s study=%s series=%s): %s",
-                type(e).__name__,
-                level or "-",
-                study or "-",
-                series or "-",
-                e,
-            )
-            yield (e.status, None)  # transparent PACS status forward
-            return
-        except Exception as e:
-            logger.exception(
-                "DIMSE C-FIND failed [%s] (level=%s study=%s series=%s)",
-                type(e).__name__,
-                level or "-",
-                study or "-",
-                series or "-",
-            )
-            yield (0xC000, None)
-            return
-        finally:
-            # break/close/GeneratorExit → upstream abort + find-lease release,
-            # deterministic instead of waiting on GC (mirrors the HTTP path).
-            gen.close()  # type: ignore[attr-defined]
+        peer = _peer(event.assoc)
+        self._bump(event.assoc, "find")
+        started = time.monotonic()
+        matched = 0
+        # "incomplete" survives an early generator close (the client hung up or
+        # cancelled the query), which the log would otherwise not distinguish
+        # from a clean finish.
+        outcome = "incomplete"
+        logger.debug(
+            "C-FIND from %s (level=%s study=%s series=%s)",
+            peer,
+            level or "-",
+            study or "-",
+            series or "-",
+        )
+        with self._inflight.track("find"):
+            gen = self._query.iter_find(ident, model=model, timeout=self._cfind_timeout)
+            try:
+                for ds in gen:
+                    if event.is_cancelled:
+                        outcome = "cancelled"
+                        yield (0xFE00, None)  # upstream released in finally
+                        return
+                    matched += 1
+                    yield (0xFF00, ds)  # same SCP thread, no event loop hop
+                outcome = "ok"
+            except (PoolExhaustedError, AssociationError) as e:
+                outcome = "refused"
+                logger.error(
+                    "DIMSE C-FIND refused [%s] (peer=%s level=%s study=%s series=%s): %s",
+                    type(e).__name__,
+                    peer,
+                    level or "-",
+                    study or "-",
+                    series or "-",
+                    e,
+                )
+                yield (0xA700, None)  # Refused: Out of Resources
+                return
+            except FindFailedError as e:
+                outcome = f"upstream 0x{e.status:04X}"
+                logger.error(
+                    "DIMSE C-FIND upstream failure [%s] (peer=%s level=%s study=%s series=%s): %s",
+                    type(e).__name__,
+                    peer,
+                    level or "-",
+                    study or "-",
+                    series or "-",
+                    e,
+                )
+                yield (e.status, None)  # transparent PACS status forward
+                return
+            except Exception as e:
+                outcome = "error"
+                logger.exception(
+                    "DIMSE C-FIND failed [%s] (peer=%s level=%s study=%s series=%s)",
+                    type(e).__name__,
+                    peer,
+                    level or "-",
+                    study or "-",
+                    series or "-",
+                )
+                yield (0xC000, None)
+                return
+            finally:
+                # break/close/GeneratorExit → upstream abort + find-lease release,
+                # deterministic instead of waiting on GC (mirrors the HTTP path).
+                gen.close()  # type: ignore[attr-defined]
+                self._finished(
+                    "C-FIND",
+                    started,
+                    outcome,
+                    "peer=%s level=%s study=%s series=%s matched=%d",
+                    peer,
+                    level or "-",
+                    study or "-",
+                    series or "-",
+                    matched,
+                )
         yield (0x0000, None)
 
     def _on_move(self, event: evt.Event) -> Iterator[Any]:
@@ -334,43 +567,89 @@ class DimseFace:
         dest_aet = (
             dest_raw.decode().strip() if isinstance(dest_raw, bytes) else str(dest_raw).strip()
         )
+        peer = _peer(event.assoc)
+        self._bump(event.assoc, "move")
         dest = self._allowlist.resolve(dest_aet)
         if dest is None:
-            logger.warning("C-MOVE to unknown destination AET %r refused", dest_aet)
+            logger.warning(
+                "C-MOVE from %s to unknown destination AET %r refused (level=%s study=%s) — "
+                "add it to [dimse.allowlist] if the destination is legitimate",
+                peer,
+                dest_aet,
+                level,
+                study or "-",
+            )
             yield (None, None)  # → 0xA801 Move Destination unknown
             return
         yield (dest.host, dest.port)
 
-        # Sub-operation count from series-level C-FIND (never instance-level).
-        try:
-            if level == "SERIES" and series:
-                count, iterator = self._series_move(study, series)
-            else:
-                count, iterator = self._study_move(study)
-        except Exception as e:
-            logger.exception("C-MOVE planning failed [%s] for study=%s", type(e).__name__, study)
-            yield 0
-            yield (0xA702, None)  # Unable to perform sub-operations
-            return
-        yield count
-
-        try:
-            for ds in iterator:
-                if event.is_cancelled:
-                    yield (0xFE00, None)
+        started = time.monotonic()
+        outcome = "incomplete"
+        count = 0
+        sent = 0
+        logger.info(
+            "C-MOVE from %s to %s@%s:%d (level=%s study=%s series=%s)",
+            peer,
+            dest_aet,
+            dest.host,
+            dest.port,
+            level,
+            study or "-",
+            series or "-",
+        )
+        with self._inflight.track("move"):
+            try:
+                # Sub-operation count from series-level C-FIND (never instance-level).
+                try:
+                    if level == "SERIES" and series:
+                        count, iterator = self._series_move(study, series)
+                    else:
+                        count, iterator = self._study_move(study)
+                except Exception as e:
+                    outcome = "planning failed"
+                    logger.exception(
+                        "C-MOVE planning failed [%s] for study=%s", type(e).__name__, study
+                    )
+                    yield 0
+                    yield (0xA702, None)  # Unable to perform sub-operations
                     return
-                yield (0xFF00, ds)
-        except (
-            MoveToSelfError,
-            ArrivalTimeoutError,
-            AssociationError,
-            PoolExhaustedError,
-        ) as e:
-            logger.exception(
-                "C-MOVE pass-through failed [%s] for study=%s", type(e).__name__, study
-            )
-            yield (0xA702, None)
-            return
+                yield count
+
+                try:
+                    for ds in iterator:
+                        if event.is_cancelled:
+                            outcome = "cancelled"
+                            yield (0xFE00, None)
+                            return
+                        sent += 1
+                        yield (0xFF00, ds)
+                    outcome = "ok"
+                except (
+                    MoveToSelfError,
+                    ArrivalTimeoutError,
+                    AssociationError,
+                    PoolExhaustedError,
+                ) as e:
+                    outcome = f"failed [{type(e).__name__}]"
+                    logger.exception(
+                        "C-MOVE pass-through failed [%s] for study=%s", type(e).__name__, study
+                    )
+                    yield (0xA702, None)
+                    return
+            finally:
+                self._finished(
+                    "C-MOVE",
+                    started,
+                    outcome,
+                    "peer=%s dest=%s level=%s study=%s series=%s sent=%d/%d",
+                    peer,
+                    dest_aet,
+                    level,
+                    study or "-",
+                    series or "-",
+                    sent,
+                    count,
+                )
 
     def _series_move(self, study: str, series: str) -> tuple[int, Iterator[Dataset]]:
         results = self._run(
