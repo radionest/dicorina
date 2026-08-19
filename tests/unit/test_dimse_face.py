@@ -18,7 +18,7 @@ from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     StudyRootQueryRetrieveInformationModelFind,
 )
 
-from dicorina.dimse_face.face import DimseFace
+from dicorina.dimse_face.face import DimseFace, _peer
 from tests.factories import make_instance
 
 
@@ -27,7 +27,19 @@ def _event(identifier: Dataset, model: object) -> Any:
         identifier=identifier,
         is_cancelled=False,
         context=SimpleNamespace(abstract_syntax=model),
+        assoc=object(),
     )
+
+
+def _ae(live: int, maximum: int) -> Any:
+    return SimpleNamespace(
+        active_associations=[SimpleNamespace(is_acceptor=True) for _ in range(live)],
+        maximum_associations=maximum,
+    )
+
+
+def _end_event(assoc: object, name: str = "EVT_RELEASED") -> Any:
+    return SimpleNamespace(assoc=assoc, event=SimpleNamespace(name=name))
 
 
 def _face(
@@ -37,10 +49,19 @@ def _face(
     client: Any = None,
     loop: Any = None,
     cfind_timeout: float = 30.0,
+    slow_operation_seconds: float = 10.0,
 ) -> DimseFace:
     none: Any = None
     return DimseFace(
-        engine, client, query, none, none, loop, "DICORINA", cfind_timeout=cfind_timeout
+        engine,
+        client,
+        query,
+        none,
+        none,
+        loop,
+        "DICORINA",
+        cfind_timeout=cfind_timeout,
+        slow_operation_seconds=slow_operation_seconds,
     )
 
 
@@ -165,6 +186,143 @@ def test_on_find_bare_timeout_logs_type_and_context(caplog) -> None:
     assert "level=STUDY" in msg
     assert "1.2.3.4" in msg
     assert record.exc_info is not None  # logger.exception attaches the traceback
+
+
+def test_peer_label_reads_service_user_info() -> None:
+    """pynetdicom exposes ServiceUser.info as a property; calling it degraded
+    every association log line to the useless 'unknown-peer' placeholder."""
+
+    class _Requestor:
+        @property
+        def info(self) -> dict[str, Any]:
+            return {
+                "ae_title": "CLIENT",
+                "address": "10.0.0.9",
+                "port": 4321,
+                "mode": "requestor",
+            }
+
+    assert _peer(SimpleNamespace(requestor=_Requestor())) == "CLIENT@10.0.0.9:4321"
+
+
+def test_peer_label_never_raises_on_an_incomplete_association() -> None:
+    """Log context must not be the reason a DIMSE handler fails."""
+    assert _peer(SimpleNamespace()) == "unknown-peer"
+
+
+def test_association_accept_and_end_are_logged(caplog) -> None:
+    """Association churn is invisible in the journal otherwise: pynetdicom logs
+    accept/reject at INFO on its own logger and dicorina logged neither, so a
+    face that had stopped taking clients looked identical to an idle one."""
+    face = _face(None)
+    face._ae = _ae(1, 10)
+    assoc = object()
+
+    with caplog.at_level(logging.INFO, logger="dicorina.dimse_face.face"):
+        face._on_accepted(SimpleNamespace(assoc=assoc))
+        face._bump(assoc, "find")
+        face._log_assoc_end(_end_event(assoc))
+
+    assert "association accepted" in caplog.text
+    assert "1/10 slots in use" in caplog.text
+    assert "association released" in caplog.text
+    assert "find=1" in caplog.text
+
+
+def test_association_end_is_summarised_once(caplog) -> None:
+    """RELEASED, ABORTED and CONN_CLOSE can all fire for one association."""
+    face = _face(None)
+    face._ae = _ae(1, 10)
+    assoc = object()
+    face._on_accepted(SimpleNamespace(assoc=assoc))
+
+    with caplog.at_level(logging.INFO, logger="dicorina.dimse_face.face"):
+        face._log_assoc_end(_end_event(assoc, "EVT_RELEASED"))
+        face._log_assoc_end(_end_event(assoc, "EVT_CONN_CLOSE"))
+
+    assert len([r for r in caplog.records if "association released" in r.getMessage()]) == 1
+    assert "conn_close" not in caplog.text
+
+
+def test_association_limit_warns_on_accept(caplog) -> None:
+    """At the cap pynetdicom refuses every further request before any handler of
+    ours runs, so this is the last point the proxy can report it."""
+    face = _face(None)
+    face._ae = _ae(10, 10)
+
+    with caplog.at_level(logging.INFO, logger="dicorina.dimse_face.face"):
+        face._on_accepted(SimpleNamespace(assoc=object()))
+
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+    assert "association limit reached" in caplog.text
+
+
+def test_rejection_logs_decoded_reason(caplog) -> None:
+    """pynetdicom announces its rejection as a bare 'Rejecting Association' at
+    INFO, without the reason — this line carries it."""
+    face = _face(None)
+    face._ae = _ae(10, 10)
+    assoc = SimpleNamespace(
+        acceptor=SimpleNamespace(
+            primitive=SimpleNamespace(result=0x02, result_source=0x03, diagnostic=0x02)
+        ),
+        requestor=SimpleNamespace(primitive=SimpleNamespace(called_ae_title="DICORINA")),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="dicorina.dimse_face.face"):
+        face._on_rejected(SimpleNamespace(assoc=assoc))
+
+    assert "association REJECTED" in caplog.text
+    assert "local limit exceeded" in caplog.text
+    assert "10/10" in caplog.text
+
+
+def test_find_completion_logs_match_count(caplog) -> None:
+    def fake_iter_find(identifier, *, model, timeout=None):  # noqa: ARG001
+        yield make_instance("1.1", "1.2", "1.3")
+        yield make_instance("1.1", "1.2", "1.4")
+
+    face = _face(SimpleNamespace(iter_find=fake_iter_find))
+    with caplog.at_level(logging.INFO, logger="dicorina.dimse_face.face"):
+        list(face._on_find(_event(Dataset(), StudyRootQueryRetrieveInformationModelFind)))
+
+    assert "C-FIND ok" in caplog.text
+    assert "matched=2" in caplog.text
+
+
+def test_slow_find_is_warned(caplog) -> None:
+    """A slow operation holds its SCP worker thread and its association slot for
+    the whole duration, so it must stand out from the ordinary per-op line."""
+
+    def fake_iter_find(identifier, *, model, timeout=None):  # noqa: ARG001
+        yield make_instance("1.1", "1.2", "1.3")
+
+    face = _face(SimpleNamespace(iter_find=fake_iter_find), slow_operation_seconds=0.0)
+    with caplog.at_level(logging.INFO, logger="dicorina.dimse_face.face"):
+        list(face._on_find(_event(Dataset(), StudyRootQueryRetrieveInformationModelFind)))
+
+    assert any(
+        r.levelno == logging.WARNING and "C-FIND" in r.getMessage() for r in caplog.records
+    )
+
+
+def test_find_dropped_by_client_is_not_logged_as_ok(caplog) -> None:
+    """An SCU that disconnects mid-query must be distinguishable from a query
+    that ran to completion — both end the generator, only one succeeded."""
+
+    def fake_iter_find(identifier, *, model, timeout=None):  # noqa: ARG001
+        for i in range(3):
+            yield make_instance(f"1.{i}", f"2.{i}", f"3.{i}")
+
+    face = _face(SimpleNamespace(iter_find=fake_iter_find))
+    handler: Any = face._on_find(_event(Dataset(), StudyRootQueryRetrieveInformationModelFind))
+
+    with caplog.at_level(logging.INFO, logger="dicorina.dimse_face.face"):
+        next(handler)
+        handler.close()
+
+    assert "C-FIND incomplete" in caplog.text
+    assert "matched=1" in caplog.text
 
 
 def test_face_ae_requests_compressed_storage_contexts() -> None:

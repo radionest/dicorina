@@ -7,10 +7,12 @@ import os
 import uvicorn
 
 from dicorina.config import load_config
+from dicorina.logging_setup import configure_logging
 
 
 def main() -> None:
     cfg = load_config(os.environ.get("DICORINA_CONFIG", "config.toml"))
+    configure_logging(cfg.logging)
     os.environ.setdefault("DICORINA_CONFIG", os.environ.get("DICORINA_CONFIG", "config.toml"))
     uvicorn.run(
         "dicorina.asgi:app",
