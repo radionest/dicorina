@@ -28,8 +28,8 @@ class PoolConfig(BaseModel):
         default_factory=lambda: [AetPoolMember(aet="DICORINA", port=11112)],
         min_length=1,
     )
-    per_aet_cap: int = 1
-    per_aet_find_cap: int = 4
+    per_aet_cap: int = Field(default=1, ge=1)
+    per_aet_find_cap: int = Field(default=4, ge=1)
 
     @model_validator(mode="after")
     def _unique_aets_and_ports(self) -> PoolConfig:
@@ -74,12 +74,18 @@ class CacheConfig(BaseModel):
 
 
 class TimeoutsConfig(BaseModel):
-    cfind: float = 30.0
-    cmove: float = 300.0
-    arrival: float = 60.0
-    completion_grace: float = 5.0
-    find_lease: float = 30.0
-    store: float = 30.0
+    # Every bound is an upper limit on how long one operation can hold an
+    # association slot. A production deployment ran cfind = 6666660.0 (77
+    # days), which also sets C-MOVE planning's wall clock (cfind + 5.0) —
+    # so a stalled query had no bound at all. An out-of-range value is
+    # refused here rather than clamped: a clamp would leave the wrong
+    # number in the deployed file for the next operator to read.
+    cfind: float = Field(default=30.0, gt=0, le=300)
+    cmove: float = Field(default=300.0, gt=0, le=3600)
+    arrival: float = Field(default=60.0, gt=0, le=600)
+    completion_grace: float = Field(default=5.0, gt=0, le=60)
+    find_lease: float = Field(default=30.0, gt=0, le=300)
+    store: float = Field(default=30.0, gt=0, le=300)
 
 
 class HealthcheckConfig(BaseModel):

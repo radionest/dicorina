@@ -27,6 +27,12 @@ store_aet = ""
 per_aet_cap = 1
 # Maximum concurrent C-FIND associations per AET.
 per_aet_find_cap = 4
+# Both caps must be >= 1. There is no upper bound here: the real ceiling is
+# how many concurrent associations the upstream PACS tolerates per AET.
+# The nearer ceiling today is the DIMSE face's own inbound cap: pynetdicom's
+# ae.maximum_associations, still its default of 10 until a later [dimse]
+# max_associations key lands. See README.md's "Reading a load incident"
+# notes for how the pool totals relate to that cap.
 
 [[pool.members]]
 aet  = "DICORINA"
@@ -87,21 +93,27 @@ qido_ttl_seconds = 5.0
 # Cache eviction check interval in seconds
 eviction_interval_seconds = 300.0
 
-# DIMSE operation timeouts
+# DIMSE operation timeouts. Every field is validated at load and an
+# out-of-range value REFUSES TO START the service — it is not clamped.
+# Each bound is a limit on how long one operation can hold an association slot.
 [timeouts]
-# C-FIND timeout in seconds
+# C-FIND timeout in seconds. Range: 0 < cfind <= 300.
+# Also sets C-MOVE planning's wall clock (cfind + 5.0).
 cfind = 30.0
-# C-MOVE timeout in seconds
+# C-MOVE timeout in seconds. Range: 0 < cmove <= 3600.
+# This is the worst-case client block through the join.
 cmove = 300.0
-# Instance arrival timeout (for multi-frame sends) in seconds
+# Instance arrival timeout (for multi-frame sends) in seconds. Range: 0 < arrival <= 600.
 arrival = 60.0
-# Grace period after completion signal in seconds
+# Grace period after completion signal in seconds. Range: 0 < completion_grace <= 60.
 completion_grace = 5.0
-# Max wait for a free per-AET C-FIND slot before failing (HTTP 503 / DIMSE 0xA700)
+# Max wait for a free per-AET C-FIND slot before failing (HTTP 503 / DIMSE 0xA700).
+# Range: 0 < find_lease <= 300.
 find_lease = 30.0
 # Per-instance C-STORE relay timeout in seconds (upstream ACSE + DIMSE).
-# Keep conservative: a non-responsive PACS holds the inbound association's
-# worker thread for up to this long per instance before the client gets 0xA700.
+# Range: 0 < store <= 300. Keep conservative: a non-responsive PACS holds the
+# inbound association's worker thread for up to this long per instance before
+# the client gets 0xA700.
 store = 30.0
 
 # Health check configuration

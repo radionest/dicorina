@@ -20,6 +20,11 @@ Production deps are **intentionally not pinned**: `pip install .` resolves the v
 2. Run `sudo deploy/install.sh` from the project root — this provisions the `dicorina` system user, creates `/var/cache/dicorina`, and sets ownership on the install dir.
 3. Enable and start the service: `systemctl enable --now dicorina`
 
+**Upgrading:** an out-of-range `[timeouts]` value or a pool cap below 1 now refuses to start —
+previously any value loaded unvalidated. Fix `/etc/dicorina/config.toml` before upgrading
+(`Restart=on-failure` / `RestartSec=5` in `deploy/dicorina.service` otherwise turns it into a
+restart loop).
+
 The unit runs the `dicorina` console script, which reads `DICORINA_CONFIG` and binds uvicorn to
 `http.bind_host`/`http.bind_port` from the config. One process, two listeners: uvicorn serves
 HTTP on the configured port; the pynetdicom DIMSE AE (C-FIND/C-MOVE/C-STORE/C-ECHO) binds
