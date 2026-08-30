@@ -47,6 +47,14 @@ port = 11112
 # Per-AET receive ports live in [[pool.members]] above.
 [scp]
 bind_ip = "0.0.0.0"
+# Concurrent inbound association ceiling on the pool's storage listeners, which
+# receive C-STORE from the upstream PACS. Must be >= 1. The 0.8.0 default is 25;
+# before that bump these listeners sat on pynetdicom's implicit 10.
+max_associations = 25
+# Instances queued per streaming session before C-STORE backpressure applies.
+# Must be >= 1. Sized too small, a PACS that outruns the consumer can stall the
+# handler past its own DIMSE timeout and abort the move.
+session_queue_maxsize = 64
 
 # DIMSE face (inbound SCP) configuration
 [dimse]
@@ -100,11 +108,6 @@ eviction_interval_seconds = 300.0
 # C-FIND timeout in seconds. Range: 0 < cfind <= 300.
 # Also sets C-MOVE planning's wall clock (cfind + 5.0).
 cfind = 30.0
-# C-MOVE timeout in seconds. Range: 0 < cmove <= 3600.
-# Worst-case client block through the join on the pinned dimsechord 0.7.0.
-# 0.8.0 makes retrieve cancellation abort-based: the knob then bounds nothing,
-# and any value but 300.0 warns at every start. Revisit when the pin bumps.
-cmove = 300.0
 # Instance arrival timeout (for multi-frame sends) in seconds. Range: 0 < arrival <= 600.
 arrival = 60.0
 # Grace period after completion signal in seconds. Range: 0 < completion_grace <= 60.
@@ -117,6 +120,12 @@ find_lease = 30.0
 # inbound association's worker thread for up to this long per instance before
 # the client gets 0xA700.
 store = 30.0
+# Max wait for a free move slot, and for a same-series retrieve already in
+# flight, before the client is refused. Range: 0 < move_lease <= 60. The two
+# waits are sequential, so a retrieve crosses at most 2x this value.
+# Replaces `cmove`, which dimsechord 0.8.0 made inert: retrieve cancellation
+# is abort-based now, so a stale `cmove` key REFUSES TO START the service.
+move_lease = 5.0
 
 # Health check configuration
 [healthcheck]

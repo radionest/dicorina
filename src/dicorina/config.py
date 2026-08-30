@@ -46,6 +46,14 @@ class ScpConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     bind_ip: str = "0.0.0.0"
+    # Inbound ceiling on the pool's storage listeners, which receive C-STORE
+    # from the upstream PACS. dimsechord 0.8.0 defaults this to 25; before the
+    # bump it was pynetdicom's implicit 10.
+    max_associations: int = Field(default=25, ge=1)
+    # Instances queued per streaming session before C-STORE backpressure
+    # applies. Sized too small, a PACS that outruns the consumer can trip its
+    # own DIMSE timeout and abort the move.
+    session_queue_maxsize: int = Field(default=64, ge=1)
 
 
 class DimseConfig(BaseModel):
@@ -74,6 +82,10 @@ class CacheConfig(BaseModel):
 
 
 class TimeoutsConfig(BaseModel):
+    # Unknown keys are refused so a timeout that no longer exists cannot sit in
+    # the deployed file looking effective — `cmove` is the first such removal.
+    model_config = ConfigDict(extra="forbid")
+
     # Every bound is an upper limit on how long one operation can hold an
     # association slot. A production deployment ran cfind = 6666660.0 (77
     # days), which also sets C-MOVE planning's wall clock (cfind + 5.0) —
@@ -81,11 +93,13 @@ class TimeoutsConfig(BaseModel):
     # refused here rather than clamped: a clamp would leave the wrong
     # number in the deployed file for the next operator to read.
     cfind: float = Field(default=30.0, gt=0, le=300)
-    cmove: float = Field(default=300.0, gt=0, le=3600)
     arrival: float = Field(default=60.0, gt=0, le=600)
     completion_grace: float = Field(default=5.0, gt=0, le=60)
     find_lease: float = Field(default=30.0, gt=0, le=300)
     store: float = Field(default=30.0, gt=0, le=300)
+    # Bounds the two sequential waits on the retrieve path: move-slot
+    # acquisition and the same-series coalescing wait.
+    move_lease: float = Field(default=5.0, gt=0, le=60)
 
 
 class HealthcheckConfig(BaseModel):

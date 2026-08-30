@@ -84,23 +84,29 @@ async def lifespan(app: FastAPI):
     # stays taken: the numbers any load incident has to be read against.
     logger.info(
         "pool: AETs %s, per_aet_cap=%d/AET (%d concurrent C-MOVEs in total), "
-        "per_aet_find_cap=%d/AET (%d concurrent C-FINDs in total); "
-        "timeouts cfind=%.0fs cmove=%.0fs arrival=%.0fs find_lease=%.0fs store=%.0fs",
+        "per_aet_find_cap=%d/AET (%d concurrent C-FINDs in total), "
+        "scp max_assoc=%d queue=%d; "
+        "timeouts cfind=%.0fs arrival=%.0fs find_lease=%.0fs store=%.0fs move_lease=%.0fs",
         [m.aet for m in members],
         cfg.pool.per_aet_cap,
         cfg.pool.per_aet_cap * len(members),
         cfg.pool.per_aet_find_cap,
         cfg.pool.per_aet_find_cap * len(members),
+        cfg.scp.max_associations,
+        cfg.scp.session_queue_maxsize,
         cfg.timeouts.cfind,
-        cfg.timeouts.cmove,
         cfg.timeouts.arrival,
         cfg.timeouts.find_lease,
         cfg.timeouts.store,
+        cfg.timeouts.move_lease,
     )
     pool = AssociationPool(
         [m.aet for m in members], cfg.pool.per_aet_cap, cfg.pool.per_aet_find_cap
     )
-    scp = StorageSCP()
+    scp = StorageSCP(
+        maximum_associations=cfg.scp.max_associations,
+        session_queue_maxsize=cfg.scp.session_queue_maxsize,
+    )
     scp.start({m.aet: m.port for m in members}, cfg.scp.bind_ip)
     cache = DicomCache(
         cfg.cache.dir,
@@ -115,9 +121,9 @@ async def lifespan(app: FastAPI):
         scp,
         cache,
         pacs,
-        cmove_timeout=cfg.timeouts.cmove,
         arrival_timeout=cfg.timeouts.arrival,
         completion_grace=cfg.timeouts.completion_grace,
+        move_lease_timeout=cfg.timeouts.move_lease,
     )
     client = DicomClient(calling_aet=pool.aets[0])
 
