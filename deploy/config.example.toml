@@ -101,7 +101,9 @@ eviction_interval_seconds = 300.0
 # Also sets C-MOVE planning's wall clock (cfind + 5.0).
 cfind = 30.0
 # C-MOVE timeout in seconds. Range: 0 < cmove <= 3600.
-# This is the worst-case client block through the join.
+# Worst-case client block through the join on the pinned dimsechord 0.7.0.
+# 0.8.0 makes retrieve cancellation abort-based: the knob then bounds nothing,
+# and any value but 300.0 warns at every start. Revisit when the pin bumps.
 cmove = 300.0
 # Instance arrival timeout (for multi-frame sends) in seconds. Range: 0 < arrival <= 600.
 arrival = 60.0
