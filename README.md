@@ -20,6 +20,26 @@ Production deps are **intentionally not pinned**: `pip install .` resolves the v
 2. Run `sudo deploy/install.sh` from the project root — this provisions the `dicorina` system user, creates `/var/cache/dicorina`, and sets ownership on the install dir.
 3. Enable and start the service: `systemctl enable --now dicorina`
 
+**Upgrading:** this release bumps `dimsechord` to 0.8.0 and tightens the config surface, so
+`/etc/dicorina/config.toml` must be edited **before** upgrading — `Restart=on-failure` /
+`RestartSec=5` in `deploy/dicorina.service` otherwise turns a stale config into a restart loop.
+
+- An out-of-range `[timeouts]` value or a pool cap below 1 now refuses to start; previously any
+  value loaded unvalidated.
+- `timeouts.cmove` is **removed**. dimsechord 0.8.0 makes retrieve cancellation abort-based, so
+  the knob bounded nothing; `[timeouts]` now rejects unknown keys, and a leftover `cmove` line is
+  a startup failure rather than a number that looks effective. Delete it.
+- `timeouts.move_lease` (default 5.0) replaces it as the retrieve-path bound: it caps the wait for
+  a free move slot and for a same-series retrieve already in flight. The two waits are sequential,
+  so a retrieve crosses at most twice this value.
+- `[scp] max_associations` (25) and `[scp] session_queue_maxsize` (64) make the pool's storage
+  listeners' ceilings explicit. Before this release they sat on pynetdicom's implicit 10 and an
+  unbounded queue.
+
+**Behavior change from dimsechord 0.8.0:** retrieves now fail fast. A request that would have
+queued behind a slow fetch is refused immediately (HTTP 503, DIMSE `0xA702`) instead of blocking
+for minutes, and an abandoned retrieve aborts its upstream C-MOVE association.
+
 The unit runs the `dicorina` console script, which reads `DICORINA_CONFIG` and binds uvicorn to
 `http.bind_host`/`http.bind_port` from the config. One process, two listeners: uvicorn serves
 HTTP on the configured port; the pynetdicom DIMSE AE (C-FIND/C-MOVE/C-STORE/C-ECHO) binds

@@ -2,6 +2,8 @@ import json
 import tomllib
 from pathlib import Path
 
+from dicorina.config import load_config
+
 CFG = Path(__file__).parent.parent / "staging" / "vm-net" / "config"
 ALLOW_FLAGS = [
     "DicomAlwaysAllowEcho", "DicomAlwaysAllowStore", "DicomAlwaysAllowFind",
@@ -25,6 +27,7 @@ def test_pacs_knows_only_pool_aets_and_denies_defaults():
 
 def test_proxy_toml_pool_allowlist_and_pacs():
     proxy = tomllib.loads((CFG / "proxy.toml").read_text(encoding="utf-8"))
+    assert load_config(CFG / "proxy.toml")
     assert proxy["pacs"]["host"] == "10.0.0.10" and proxy["pacs"]["aet"] == "HOSPITALPACS"
     members = proxy["pool"]["members"]
     assert [m["aet"] for m in members] == ["DICORINA1", "DICORINA2"]

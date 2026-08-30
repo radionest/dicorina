@@ -85,7 +85,7 @@ async def app_client(request, fake_pacs, free_port, tmp_path):
         "dimse": {"listen_ip": "127.0.0.1", "listen_port": free_port(), "aet": face_aet},
         "http": {"bind_host": "127.0.0.1", "bind_port": free_port()},
         "cache": {"dir": str(tmp_path / "cache"), "qido_ttl_seconds": 0.0},
-        "timeouts": {"cmove": 60.0, "arrival": 30.0, "completion_grace": 2.0},
+        "timeouts": {"arrival": 30.0, "completion_grace": 2.0},
         "healthcheck": {"interval_seconds": 9999.0},
     }
     cfg = DicorinaConfig.model_validate(_deep_merge(base, getattr(request, "param", {})))

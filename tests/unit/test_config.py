@@ -30,8 +30,10 @@ def test_load_minimal_applies_defaults(tmp_path: Path) -> None:
     assert cfg.http.auth_token == ""
     assert cfg.cache.qido_ttl_seconds == 5.0
     assert cfg.cache.memory_max_size_gb == 4.0
-    assert cfg.timeouts.cmove == 300.0
+    assert cfg.timeouts.move_lease == 5.0
     assert cfg.timeouts.find_lease == 30.0
+    assert cfg.scp.max_associations == 25
+    assert cfg.scp.session_queue_maxsize == 64
 
 
 def test_allowlist_and_pool_parse(tmp_path: Path) -> None:
@@ -226,3 +228,96 @@ def test_store_config_overrides(tmp_path) -> None:
     )
     assert cfg.timeouts.store == 5.0
     assert cfg.pacs.store_aet == "DICSTORE"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("cfind", 6666660.0),  # the production value that removed every bound on a stuck query
+        ("move_lease", 61.0),
+        ("arrival", 601.0),
+        ("completion_grace", 61.0),
+        ("find_lease", 301.0),
+        ("store", 301.0),
+    ],
+)
+def test_timeout_above_bound_rejected(tmp_path: Path, field: str, value: float) -> None:
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(_MINIMAL + f"\n[timeouts]\n{field} = {value}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        load_config(cfg_file)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["cfind", "arrival", "completion_grace", "find_lease", "store", "move_lease"],
+)
+@pytest.mark.parametrize("value", [0.0, -1.0])
+def test_non_positive_timeout_rejected(tmp_path: Path, field: str, value: float) -> None:
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(_MINIMAL + f"\n[timeouts]\n{field} = {value}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        load_config(cfg_file)
+
+
+def test_timeouts_at_their_upper_bound_load(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(
+        _MINIMAL
+        + "\n[timeouts]\ncfind = 300.0\narrival = 600.0\n"
+        + "completion_grace = 60.0\nfind_lease = 300.0\nstore = 300.0\nmove_lease = 60.0\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_file)
+    assert cfg.timeouts.cfind == 300.0
+    assert cfg.timeouts.arrival == 600.0
+    assert cfg.timeouts.completion_grace == 60.0
+    assert cfg.timeouts.find_lease == 300.0
+    assert cfg.timeouts.store == 300.0
+    assert cfg.timeouts.move_lease == 60.0
+
+
+@pytest.mark.parametrize("field", ["per_aet_cap", "per_aet_find_cap"])
+def test_zero_pool_cap_rejected(tmp_path: Path, field: str) -> None:
+    """0 is not "unlimited" — it is a pool in which every lease times out."""
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(_MINIMAL + f"\n[pool]\n{field} = 0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        load_config(cfg_file)
+
+
+def test_large_pool_caps_accepted(tmp_path: Path) -> None:
+    """No upper bound: the real ceiling is the upstream PACS's per-AET
+    tolerance, which dicorina does not know (design D2)."""
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(_MINIMAL + "\n[pool]\nper_aet_find_cap = 512\n", encoding="utf-8")
+    assert load_config(cfg_file).pool.per_aet_find_cap == 512
+
+
+def test_stale_cmove_key_rejected(tmp_path: Path) -> None:
+    """dimsechord 0.8.0 made cmove_timeout inert, so the key is gone. A config
+    still carrying it must fail rather than let the operator believe it bounds
+    anything (design D2)."""
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(_MINIMAL + "\n[timeouts]\ncmove = 500.0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="cmove"):
+        load_config(cfg_file)
+
+
+def test_scp_caps_parse(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(
+        _MINIMAL.replace("[scp]\n", "[scp]\nmax_associations = 8\nsession_queue_maxsize = 16\n"),
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_file)
+    assert cfg.scp.max_associations == 8
+    assert cfg.scp.session_queue_maxsize == 16
+
+
+@pytest.mark.parametrize("field", ["max_associations", "session_queue_maxsize"])
+def test_zero_scp_cap_rejected(tmp_path: Path, field: str) -> None:
+    cfg_file = tmp_path / "d.toml"
+    cfg_file.write_text(_MINIMAL.replace("[scp]\n", f"[scp]\n{field} = 0\n"), encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        load_config(cfg_file)

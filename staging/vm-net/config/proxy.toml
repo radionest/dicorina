@@ -40,7 +40,6 @@ eviction_interval_seconds = 300.0
 
 [timeouts]
 cfind = 30.0
-cmove = 300.0
 arrival = 60.0
 completion_grace = 5.0
 
