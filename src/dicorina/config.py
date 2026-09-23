@@ -6,7 +6,23 @@ import os
 import tomllib
 from pathlib import Path
 
+from dimsechord import (
+    DEFAULT_IMAGE_STORAGE_CLASSES,
+    DEFAULT_OTHER_STORAGE_CLASSES,
+    build_storage_scu_contexts,
+)
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydicom.uid import UID
+from pynetdicom import sop_class
+from pynetdicom.sop_class import XRayAngiographicImageStorage  # type: ignore[attr-defined]
+
+# dimsechord's curated set leaves out angiography, whose C-MOVE sub-operations
+# then all fail for lack of a presentation context. With XA the default is 115
+# of the 128 contexts one association can carry.
+_STORAGE_IMAGE_CLASSES: tuple[str, ...] = (
+    *DEFAULT_IMAGE_STORAGE_CLASSES,
+    str(XRayAngiographicImageStorage),
+)
 
 
 class PacsConfig(BaseModel):
@@ -57,10 +73,43 @@ class ScpConfig(BaseModel):
 
 
 class DimseConfig(BaseModel):
+    # A misspelled storage key would otherwise load the defaults silently.
+    # validate_default: the defaults are deduplicated too, should dimsechord's
+    # curated set ever gain XA itself.
+    model_config = ConfigDict(extra="forbid", validate_default=True)
+
     aet: str = "DICORINA"
     listen_ip: str = "0.0.0.0"
     listen_port: int = 4242
     allowlist: dict[str, str] = Field(default_factory=dict)
+    # Storage SOP classes the face forwards on C-MOVE and accepts for C-STORE
+    # relay. Image classes also negotiate dimsechord's 8 compressed transfer syntaxes.
+    storage_image_classes: tuple[str, ...] = _STORAGE_IMAGE_CLASSES
+    storage_other_classes: tuple[str, ...] = DEFAULT_OTHER_STORAGE_CLASSES
+
+    @field_validator("storage_image_classes", "storage_other_classes")
+    @classmethod
+    def _sop_class_uids(cls, names: tuple[str, ...]) -> tuple[str, ...]:
+        # Each entry is a pynetdicom SOP class name or a bare UID.
+        uids = tuple(str(getattr(sop_class, name, name)) for name in names)
+        for name, uid in zip(names, uids, strict=True):
+            if not UID(uid).is_valid:
+                raise ValueError(f"{name!r} is neither a SOP class UID nor a pynetdicom name")
+        return tuple(dict.fromkeys(uids))  # a repeat would only burn contexts
+
+    @model_validator(mode="after")
+    def _fits_one_association(self) -> DimseConfig:
+        both = set(self.storage_image_classes) & set(self.storage_other_classes)
+        if both:
+            raise ValueError(f"listed as both image and other storage classes: {sorted(both)}")
+        if not (self.storage_image_classes or self.storage_other_classes):
+            # pynetdicom refuses to associate with no requested context, so every
+            # C-MOVE would fail (logged as an invalid destination AE).
+            raise ValueError("storage_image_classes and storage_other_classes are both empty")
+        build_storage_scu_contexts(
+            self.storage_image_classes, other_classes=self.storage_other_classes
+        )  # raises ValueError past the 128-context limit
+        return self
 
 
 class HttpConfig(BaseModel):

@@ -41,10 +41,11 @@ from pynetdicom.sop_class import (  # type: ignore[attr-defined]
 from dicorina.stats import InflightCounter
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
     from dimsechord import DicomClient, DicomNode, PullEngine, QueryEngine
     from pydicom import Dataset
+    from pynetdicom.presentation import PresentationContext
 
     from dicorina.dimse_face.allowlist import DestinationAllowlist
 
@@ -95,7 +96,11 @@ class _AssocStats:
         return " ".join(f"{k}={v}" for k, v in sorted(self.counts.items())) or "no operations"
 
 
-def _build_ae(aet: str) -> AE:
+def _build_ae(
+    aet: str,
+    storage_scp: list[PresentationContext],
+    storage_scu: list[PresentationContext],
+) -> AE:
     """Face AE: QR/Echo + storage SCP contexts, plus storage SCU contexts for C-MOVE forwarding.
 
     Requested contexts come from dimsechord's builder: one uncompressed context
@@ -113,9 +118,9 @@ def _build_ae(aet: str) -> AE:
         StudyRootQueryRetrieveInformationModelMove,
     ):
         ae.add_supported_context(cx)
-    for cx in build_storage_scp_contexts():
+    for cx in storage_scp:
         ae.add_supported_context(cx.abstract_syntax, cx.transfer_syntax)  # type: ignore[arg-type]
-    ae.requested_contexts = build_storage_scu_contexts()
+    ae.requested_contexts = storage_scu
     return ae
 
 
@@ -135,6 +140,8 @@ class DimseFace:
         store_aet: str = "",
         store_timeout: float = 30.0,
         slow_operation_seconds: float = 10.0,
+        storage_image_classes: Sequence[str],
+        storage_other_classes: Sequence[str],
     ) -> None:
         self._engine = engine
         self._client = client
@@ -147,6 +154,14 @@ class DimseFace:
         self._cmove_count_timeout = cmove_count_timeout
         self._store_aet = store_aet or aet
         self._store_timeout = store_timeout
+        # One class matrix for both directions: every instance the face accepts
+        # (relay SCP) is proposable upstream and to C-MOVE destinations (SCU).
+        self._scp_contexts = build_storage_scp_contexts(
+            storage_image_classes, other_classes=storage_other_classes
+        )
+        self._scu_contexts = build_storage_scu_contexts(
+            storage_image_classes, other_classes=storage_other_classes
+        )
         self._store_sessions: dict[Any, StoreSession] = {}
         self._store_inflight: set[Any] = set()
         self._store_doomed: set[Any] = set()
@@ -195,7 +210,7 @@ class DimseFace:
             return
         # The external face accepts only cfg.dimse.aet as called-AET; the pool
         # holds upstream identities and no longer names the face.
-        ae = _build_ae(self._aet)
+        ae = _build_ae(self._aet, self._scp_contexts, self._scu_contexts)
         handlers: list[Any] = [
             (evt.EVT_ACCEPTED, self._on_accepted),
             (evt.EVT_REJECTED, self._on_rejected),
@@ -362,6 +377,7 @@ class DimseFace:
                     self._pacs,
                     calling_aet=self._store_aet,
                     timeout=self._store_timeout,
+                    contexts=self._scu_contexts,
                 )
                 self._store_sessions[assoc] = session
             self._store_inflight.add(assoc)

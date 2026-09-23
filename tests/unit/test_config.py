@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from dicorina.config import DicorinaConfig, load_config
+from dicorina.config import DicorinaConfig, DimseConfig, load_config
 
 _MINIMAL = """
 [pacs]
@@ -321,3 +321,79 @@ def test_zero_scp_cap_rejected(tmp_path: Path, field: str) -> None:
     cfg_file.write_text(_MINIMAL.replace("[scp]\n", f"[scp]\n{field} = 0\n"), encoding="utf-8")
     with pytest.raises(ValueError, match=field):
         load_config(cfg_file)
+
+
+_XA = "1.2.840.10008.5.1.4.1.1.12.1"  # X-Ray Angiographic Image Storage
+
+
+def test_storage_classes_default_adds_angiography() -> None:
+    from dimsechord import DEFAULT_IMAGE_STORAGE_CLASSES, DEFAULT_OTHER_STORAGE_CLASSES
+
+    cfg = DimseConfig()
+    assert cfg.storage_image_classes == (*DEFAULT_IMAGE_STORAGE_CLASSES, _XA)
+    assert cfg.storage_other_classes == DEFAULT_OTHER_STORAGE_CLASSES
+
+
+def test_storage_classes_accept_keywords_and_uids(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "d.toml"
+    dimse = """
+[dimse]
+storage_image_classes = ["XRayAngiographicImageStorage", "1.2.840.10008.5.1.4.1.1.2"]
+storage_other_classes = []
+"""
+    cfg_file.write_text(_MINIMAL + dimse, encoding="utf-8")
+    cfg = load_config(cfg_file)
+    assert cfg.dimse.storage_image_classes == (_XA, "1.2.840.10008.5.1.4.1.1.2")
+    assert cfg.dimse.storage_other_classes == ()
+
+
+def test_unknown_storage_class_rejected() -> None:
+    with pytest.raises(ValueError, match="XRayAngiograhicImageStorage"):
+        DimseConfig(storage_image_classes=("XRayAngiograhicImageStorage",))
+
+
+def test_storage_classes_over_context_budget_rejected() -> None:
+    # 15 image classes x (1 + 8 compressed syntaxes) = 135 > 128 per association.
+    classes = tuple(f"1.2.3.{n}" for n in range(15))
+    with pytest.raises(ValueError, match="exceed the limit of 128"):
+        DimseConfig(storage_image_classes=classes, storage_other_classes=())
+
+
+def test_unknown_dimse_key_rejected() -> None:
+    with pytest.raises(ValueError, match="storage_image_class"):
+        DimseConfig(storage_image_class=("XRayAngiographicImageStorage",))  # type: ignore[call-arg]
+
+
+def test_repeated_storage_class_is_deduplicated() -> None:
+    cfg = DimseConfig(storage_image_classes=("XRayAngiographicImageStorage", _XA))
+    assert cfg.storage_image_classes == (_XA,)
+
+
+def test_class_in_both_storage_lists_rejected() -> None:
+    with pytest.raises(ValueError, match="both image and other"):
+        DimseConfig(storage_image_classes=(_XA,), storage_other_classes=(_XA,))
+
+
+def test_empty_storage_lists_rejected() -> None:
+    with pytest.raises(ValueError, match="both empty"):
+        DimseConfig(storage_image_classes=(), storage_other_classes=())
+
+
+def test_example_storage_lists_match_defaults() -> None:
+    """config.example.toml spells the defaults out and quotes their context
+    count; a dimsechord bump that changes its curated set must fail here."""
+    import tomllib
+
+    from dimsechord import build_storage_scu_contexts
+
+    example = Path(__file__).parents[2] / "deploy" / "config.example.toml"
+    lines = example.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("# storage_image_classes"))
+    end = [i for i, line in enumerate(lines) if line == "# ]" and i > start][1]
+    documented = DimseConfig(**tomllib.loads("\n".join(ln[2:] for ln in lines[start : end + 1])))
+    default = DimseConfig()
+    assert documented == default
+    contexts = build_storage_scu_contexts(
+        default.storage_image_classes, other_classes=default.storage_other_classes
+    )
+    assert len(contexts) == 115  # the figure quoted in config.example.toml and config.py

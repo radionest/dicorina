@@ -18,6 +18,7 @@ from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     StudyRootQueryRetrieveInformationModelFind,
 )
 
+from dicorina.config import DimseConfig
 from dicorina.dimse_face.face import DimseFace, _peer
 from tests.factories import make_instance
 
@@ -62,6 +63,8 @@ def _face(
         "DICORINA",
         cfind_timeout=cfind_timeout,
         slow_operation_seconds=slow_operation_seconds,
+        storage_image_classes=DimseConfig().storage_image_classes,
+        storage_other_classes=DimseConfig().storage_other_classes,
     )
 
 
@@ -334,9 +337,14 @@ def test_face_ae_requests_compressed_storage_contexts() -> None:
 
     from dicorina.dimse_face.face import _build_ae
 
-    ae = _build_ae("DICORINA")
+    face = _face(None)
+    ae = _build_ae("DICORINA", face._scp_contexts, face._scu_contexts)
     contexts = ae.requested_contexts
     assert 0 < len(contexts) <= 128
+    # Angiography is forwarded and accepted for relay (outside dimsechord's set).
+    xa = "1.2.840.10008.5.1.4.1.1.12.1"
+    assert any(cx.abstract_syntax == xa for cx in contexts)
+    assert any(cx.abstract_syntax == xa for cx in ae.supported_contexts)
 
     ct = "1.2.840.10008.5.1.4.1.1.2"  # CT Image Storage
     ct_contexts = [cx for cx in contexts if cx.abstract_syntax == ct]

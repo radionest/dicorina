@@ -12,6 +12,7 @@ from dimsechord import AssociationError, NoPresentationContextError
 from pydicom.uid import generate_uid
 
 import dicorina.dimse_face.face as face_mod
+from dicorina.config import DimseConfig
 from dicorina.dimse_face.face import DimseFace
 from tests.factories import make_instance
 
@@ -19,10 +20,11 @@ from tests.factories import make_instance
 class _FakeSession:
     instances: ClassVar[list[_FakeSession]] = []
 
-    def __init__(self, peer: Any, *, calling_aet: str, timeout: float) -> None:
+    def __init__(self, peer: Any, *, calling_aet: str, timeout: float, contexts: Any) -> None:
         self.peer = peer
         self.calling_aet = calling_aet
         self.timeout = timeout
+        self.contexts = contexts
         self.stored: list[Any] = []
         self.closed = False
         self.status = 0x0000
@@ -47,7 +49,11 @@ def _fake_session(monkeypatch):
 
 def _face(**kwargs: Any) -> DimseFace:
     none: Any = None
-    return DimseFace(none, none, none, none, none, none, "DICORINA", **kwargs)
+    storage = {
+        "storage_image_classes": DimseConfig().storage_image_classes,
+        "storage_other_classes": DimseConfig().storage_other_classes,
+    }
+    return DimseFace(none, none, none, none, none, none, "DICORINA", **(storage | kwargs))
 
 
 def _store_event(assoc: object) -> Any:
@@ -69,6 +75,15 @@ def test_session_created_lazily_per_association() -> None:
     assert len(_FakeSession.instances[0].stored) == 2
     face._on_store(_store_event(a2))
     assert len(_FakeSession.instances) == 2
+
+
+def test_relay_proposes_the_configured_storage_classes() -> None:
+    """The relay must propose exactly what the face accepts, or an accepted
+    instance could find no upstream context."""
+    ct = "1.2.840.10008.5.1.4.1.1.2"
+    face = _face(storage_image_classes=(ct,), storage_other_classes=())
+    face._on_store(_store_event(object()))
+    assert {cx.abstract_syntax for cx in _FakeSession.instances[0].contexts} == {ct}
 
 
 def test_dataset_carries_file_meta() -> None:

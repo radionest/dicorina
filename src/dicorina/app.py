@@ -170,6 +170,8 @@ async def lifespan(app: FastAPI):
         store_aet=cfg.pacs.store_aet,
         store_timeout=cfg.timeouts.store,
         slow_operation_seconds=cfg.logging.slow_operation_seconds,
+        storage_image_classes=cfg.dimse.storage_image_classes,
+        storage_other_classes=cfg.dimse.storage_other_classes,
     )
     dimse.start(cfg.dimse.listen_port, cfg.dimse.listen_ip)
     app.state.dimse = dimse
