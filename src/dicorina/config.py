@@ -6,7 +6,23 @@ import os
 import tomllib
 from pathlib import Path
 
+from dimsechord import (
+    DEFAULT_IMAGE_STORAGE_CLASSES,
+    DEFAULT_OTHER_STORAGE_CLASSES,
+    build_storage_scu_contexts,
+)
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydicom.uid import UID
+from pynetdicom import sop_class
+from pynetdicom.sop_class import XRayAngiographicImageStorage  # type: ignore[attr-defined]
+
+# dimsechord's curated set leaves out angiography, whose C-MOVE sub-operations
+# then all fail for lack of a presentation context. With XA the default is 115
+# of the 128 contexts one association can carry.
+STORAGE_IMAGE_CLASSES: tuple[str, ...] = (
+    *DEFAULT_IMAGE_STORAGE_CLASSES,
+    str(XRayAngiographicImageStorage),
+)
 
 
 class PacsConfig(BaseModel):
@@ -61,6 +77,27 @@ class DimseConfig(BaseModel):
     listen_ip: str = "0.0.0.0"
     listen_port: int = 4242
     allowlist: dict[str, str] = Field(default_factory=dict)
+    # Storage SOP classes the face forwards on C-MOVE and accepts for C-STORE
+    # relay. Image classes also negotiate every compressed transfer syntax.
+    storage_image_classes: tuple[str, ...] = STORAGE_IMAGE_CLASSES
+    storage_other_classes: tuple[str, ...] = DEFAULT_OTHER_STORAGE_CLASSES
+
+    @field_validator("storage_image_classes", "storage_other_classes")
+    @classmethod
+    def _sop_class_uids(cls, names: tuple[str, ...]) -> tuple[str, ...]:
+        # Each entry is a pynetdicom SOP class name or a bare UID.
+        uids = tuple(str(getattr(sop_class, name, name)) for name in names)
+        for name, uid in zip(names, uids, strict=True):
+            if not UID(uid).is_valid:
+                raise ValueError(f"{name!r} is neither a SOP class UID nor a pynetdicom name")
+        return uids
+
+    @model_validator(mode="after")
+    def _fits_one_association(self) -> DimseConfig:
+        build_storage_scu_contexts(
+            self.storage_image_classes, other_classes=self.storage_other_classes
+        )  # raises ValueError past the 128-context limit
+        return self
 
 
 class HttpConfig(BaseModel):

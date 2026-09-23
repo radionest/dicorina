@@ -332,11 +332,17 @@ def test_face_ae_requests_compressed_storage_contexts() -> None:
     (observed live: Completed=5, Failed=807 on a JPEG Lossless series)."""
     from dimsechord import DEFAULT_COMPRESSED_TRANSFER_SYNTAXES
 
+    from dicorina.config import DimseConfig
     from dicorina.dimse_face.face import _build_ae
 
-    ae = _build_ae("DICORINA")
+    cfg = DimseConfig()
+    ae = _build_ae("DICORINA", cfg.storage_image_classes, cfg.storage_other_classes)
     contexts = ae.requested_contexts
     assert 0 < len(contexts) <= 128
+    # Angiography is forwarded and accepted for relay (outside dimsechord's set).
+    xa = "1.2.840.10008.5.1.4.1.1.12.1"
+    assert any(cx.abstract_syntax == xa for cx in contexts)
+    assert any(cx.abstract_syntax == xa for cx in ae.supported_contexts)
 
     ct = "1.2.840.10008.5.1.4.1.1.2"  # CT Image Storage
     ct_contexts = [cx for cx in contexts if cx.abstract_syntax == ct]

@@ -5,10 +5,14 @@ import logging
 import time
 
 import pytest
+from pydicom.uid import generate_uid
 from pynetdicom import AE, evt
 from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     StudyRootQueryRetrieveInformationModelMove,
+    XRayAngiographicImageStorage,
 )
+
+from tests.factories import make_instance
 
 
 class _Receiver:
@@ -40,11 +44,18 @@ class _Receiver:
 
 @pytest.mark.asyncio
 async def test_cmove_passthrough_to_registered_modality(
-    app_client, seeded_study, free_port
+    app_client, seeded_study, fake_pacs, free_port
 ) -> None:
     _, ctx = app_client
     study = seeded_study["study"][0]
+    # One angiography instance: XA sits outside dimsechord's curated storage
+    # set, and without its context every XA sub-operation failed with "No
+    # presentation context for 'X-Ray Angiographic Image Storage'" (seen live).
+    xa = make_instance(study, generate_uid(), generate_uid(), modality="XA")
+    xa.SOPClassUID = xa.file_meta.MediaStorageSOPClassUID = XRayAngiographicImageStorage
+    fake_pacs.add_instance(xa)
     expected = {sop for s in seeded_study["series"] for sop in seeded_study[s]}
+    expected.add(str(xa.SOPInstanceUID))
 
     recv_port = free_port()
     recv = _Receiver()

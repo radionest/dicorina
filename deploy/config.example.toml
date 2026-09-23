@@ -68,6 +68,28 @@ aet = "DICORINA"
 listen_ip = "0.0.0.0"
 # Port the DIMSE face listens on; external SCUs connect here
 listen_port = 4242
+# Storage SOP classes the face forwards to C-MOVE destinations and accepts for
+# C-STORE relay; an instance of any other class fails its sub-operation. Entries
+# are pynetdicom names or bare UIDs. Omit a key to keep its default (below:
+# dimsechord's curated set plus XRayAngiographicImageStorage).
+# Image classes also negotiate 8 compressed transfer syntaxes, so each costs 9
+# presentation contexts, other classes 1. The total must stay <= 128 (one
+# association's limit), or the service REFUSES TO START; the default uses 115.
+# storage_image_classes = [
+#   "CTImageStorage", "EnhancedCTImageStorage", "MRImageStorage",
+#   "EnhancedMRImageStorage", "UltrasoundImageStorage",
+#   "UltrasoundMultiFrameImageStorage", "SecondaryCaptureImageStorage",
+#   "ComputedRadiographyImageStorage", "DigitalXRayImageStorageForPresentation",
+#   "PositronEmissionTomographyImageStorage", "XRayAngiographicImageStorage",
+# ]
+# storage_other_classes = [
+#   "BasicTextSRStorage", "EnhancedSRStorage", "ComprehensiveSRStorage",
+#   "Comprehensive3DSRStorage", "GrayscaleSoftcopyPresentationStateStorage",
+#   "ColorSoftcopyPresentationStateStorage", "KeyObjectSelectionDocumentStorage",
+#   "EncapsulatedPDFStorage", "EncapsulatedCDAStorage", "RTDoseStorage",
+#   "RTStructureSetStorage", "RTPlanStorage", "RTImageStorage",
+#   "SegmentationStorage", "SurfaceSegmentationStorage", "RawDataStorage",
+# ]
 # Optional: AE Title to IP:port allowlist for security
 # Uncomment to restrict which remote AEs can connect
 # [dimse.allowlist]

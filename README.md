@@ -60,6 +60,13 @@ if the PACS is down, the client's store fails and the client retries). The PACS
 must accept C-STORE associations from `pacs.store_aet` (default: `dimse.aet`) —
 register that AET on the PACS before enabling clients.
 
+**Storage SOP classes:** the face forwards (C-MOVE) and relays (C-STORE) only the
+classes in `dimse.storage_image_classes` / `dimse.storage_other_classes`. An instance
+of any other class fails its sub-operation with `No presentation context for '<class>'`
+in the journal. To add a class, list it there (see `deploy/config.example.toml` for the
+128-context budget). The default adds X-Ray Angiographic Image Storage to dimsechord's
+curated set.
+
 ## Logs
 
 dicorina installs its own root logging handler at startup. This matters because

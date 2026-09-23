@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from dicorina.config import DicorinaConfig, load_config
+from dicorina.config import DicorinaConfig, DimseConfig, load_config
 
 _MINIMAL = """
 [pacs]
@@ -321,3 +321,39 @@ def test_zero_scp_cap_rejected(tmp_path: Path, field: str) -> None:
     cfg_file.write_text(_MINIMAL.replace("[scp]\n", f"[scp]\n{field} = 0\n"), encoding="utf-8")
     with pytest.raises(ValueError, match=field):
         load_config(cfg_file)
+
+
+_XA = "1.2.840.10008.5.1.4.1.1.12.1"  # X-Ray Angiographic Image Storage
+
+
+def test_storage_classes_default_adds_angiography() -> None:
+    from dimsechord import DEFAULT_IMAGE_STORAGE_CLASSES, DEFAULT_OTHER_STORAGE_CLASSES
+
+    cfg = DimseConfig()
+    assert cfg.storage_image_classes == (*DEFAULT_IMAGE_STORAGE_CLASSES, _XA)
+    assert cfg.storage_other_classes == DEFAULT_OTHER_STORAGE_CLASSES
+
+
+def test_storage_classes_accept_keywords_and_uids(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "d.toml"
+    dimse = """
+[dimse]
+storage_image_classes = ["XRayAngiographicImageStorage", "1.2.840.10008.5.1.4.1.1.2"]
+storage_other_classes = []
+"""
+    cfg_file.write_text(_MINIMAL + dimse, encoding="utf-8")
+    cfg = load_config(cfg_file)
+    assert cfg.dimse.storage_image_classes == (_XA, "1.2.840.10008.5.1.4.1.1.2")
+    assert cfg.dimse.storage_other_classes == ()
+
+
+def test_unknown_storage_class_rejected() -> None:
+    with pytest.raises(ValueError, match="XRayAngiograhicImageStorage"):
+        DimseConfig(storage_image_classes=("XRayAngiograhicImageStorage",))
+
+
+def test_storage_classes_over_context_budget_rejected() -> None:
+    # 15 image classes x (1 + 8 compressed syntaxes) = 135 > 128 per association.
+    classes = tuple(f"1.2.3.{n}" for n in range(15))
+    with pytest.raises(ValueError, match="exceed the limit of 128"):
+        DimseConfig(storage_image_classes=classes, storage_other_classes=())
