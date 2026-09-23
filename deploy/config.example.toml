@@ -69,7 +69,8 @@ listen_ip = "0.0.0.0"
 # Port the DIMSE face listens on; external SCUs connect here
 listen_port = 4242
 # Storage SOP classes the face forwards to C-MOVE destinations and accepts for
-# C-STORE relay; an instance of any other class fails its sub-operation. Entries
+# C-STORE relay. Any other class fails its C-MOVE sub-operation and is refused
+# for relay at association negotiation. Entries
 # are pynetdicom names or bare UIDs. Omit a key to keep its default (below:
 # dimsechord's curated set plus XRayAngiographicImageStorage).
 # Image classes also negotiate 8 compressed transfer syntaxes, so each costs 9

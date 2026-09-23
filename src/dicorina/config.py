@@ -73,12 +73,15 @@ class ScpConfig(BaseModel):
 
 
 class DimseConfig(BaseModel):
+    # A misspelled storage key would otherwise load the defaults silently.
+    model_config = ConfigDict(extra="forbid")
+
     aet: str = "DICORINA"
     listen_ip: str = "0.0.0.0"
     listen_port: int = 4242
     allowlist: dict[str, str] = Field(default_factory=dict)
     # Storage SOP classes the face forwards on C-MOVE and accepts for C-STORE
-    # relay. Image classes also negotiate every compressed transfer syntax.
+    # relay. Image classes also negotiate dimsechord's 8 compressed transfer syntaxes.
     storage_image_classes: tuple[str, ...] = STORAGE_IMAGE_CLASSES
     storage_other_classes: tuple[str, ...] = DEFAULT_OTHER_STORAGE_CLASSES
 

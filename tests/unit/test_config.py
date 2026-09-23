@@ -357,3 +357,8 @@ def test_storage_classes_over_context_budget_rejected() -> None:
     classes = tuple(f"1.2.3.{n}" for n in range(15))
     with pytest.raises(ValueError, match="exceed the limit of 128"):
         DimseConfig(storage_image_classes=classes, storage_other_classes=())
+
+
+def test_unknown_dimse_key_rejected() -> None:
+    with pytest.raises(ValueError, match="storage_image_class"):
+        DimseConfig(storage_image_class=("XRayAngiographicImageStorage",))  # type: ignore[call-arg]

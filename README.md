@@ -61,10 +61,11 @@ must accept C-STORE associations from `pacs.store_aet` (default: `dimse.aet`) â€
 register that AET on the PACS before enabling clients.
 
 **Storage SOP classes:** the face forwards (C-MOVE) and relays (C-STORE) only the
-classes in `dimse.storage_image_classes` / `dimse.storage_other_classes`. An instance
-of any other class fails its sub-operation with `No presentation context for '<class>'`
-in the journal. To add a class, list it there (see `deploy/config.example.toml` for the
-128-context budget). The default adds X-Ray Angiographic Image Storage to dimsechord's
+classes in `dimse.storage_image_classes` / `dimse.storage_other_classes`. For any other
+class, a C-MOVE sub-operation fails with `No presentation context for '<class>'` in the
+journal. A C-STORE relay of that class is refused during association negotiation, so its
+error shows on the client, not in dicorina's journal. To add a class, list it there (see
+`deploy/config.example.toml` for the 128-context budget). The default adds X-Ray Angiographic Image Storage to dimsechord's
 curated set.
 
 ## Logs
