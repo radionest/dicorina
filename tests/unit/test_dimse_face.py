@@ -18,6 +18,7 @@ from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     StudyRootQueryRetrieveInformationModelFind,
 )
 
+from dicorina.config import DimseConfig
 from dicorina.dimse_face.face import DimseFace, _peer
 from tests.factories import make_instance
 
@@ -62,6 +63,8 @@ def _face(
         "DICORINA",
         cfind_timeout=cfind_timeout,
         slow_operation_seconds=slow_operation_seconds,
+        storage_image_classes=DimseConfig().storage_image_classes,
+        storage_other_classes=DimseConfig().storage_other_classes,
     )
 
 
@@ -332,11 +335,10 @@ def test_face_ae_requests_compressed_storage_contexts() -> None:
     (observed live: Completed=5, Failed=807 on a JPEG Lossless series)."""
     from dimsechord import DEFAULT_COMPRESSED_TRANSFER_SYNTAXES
 
-    from dicorina.config import DimseConfig
     from dicorina.dimse_face.face import _build_ae
 
-    cfg = DimseConfig()
-    ae = _build_ae("DICORINA", cfg.storage_image_classes, cfg.storage_other_classes)
+    face = _face(None)
+    ae = _build_ae("DICORINA", face._scp_contexts, face._scu_contexts)
     contexts = ae.requested_contexts
     assert 0 < len(contexts) <= 128
     # Angiography is forwarded and accepted for relay (outside dimsechord's set).

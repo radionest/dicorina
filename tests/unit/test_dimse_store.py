@@ -12,6 +12,7 @@ from dimsechord import AssociationError, NoPresentationContextError
 from pydicom.uid import generate_uid
 
 import dicorina.dimse_face.face as face_mod
+from dicorina.config import DimseConfig
 from dicorina.dimse_face.face import DimseFace
 from tests.factories import make_instance
 
@@ -48,7 +49,11 @@ def _fake_session(monkeypatch):
 
 def _face(**kwargs: Any) -> DimseFace:
     none: Any = None
-    return DimseFace(none, none, none, none, none, none, "DICORINA", **kwargs)
+    storage = {
+        "storage_image_classes": DimseConfig().storage_image_classes,
+        "storage_other_classes": DimseConfig().storage_other_classes,
+    }
+    return DimseFace(none, none, none, none, none, none, "DICORINA", **(storage | kwargs))
 
 
 def _store_event(assoc: object) -> Any:
